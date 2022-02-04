@@ -530,27 +530,14 @@
 					var wrapper = document.querySelectorAll('.col-lg-4.col-md-4');
 					var btn = document.querySelector('.main_btn');
 					btn.addEventListener('click',function(){
-						if (btn.innerText=="Load More Items"){
-							var i = 0;
-							while(wrapper[i]){
-								wrapper[i].style.display = 'block';
-								wrapper[i].style.position = 'static';
-								i++;
-							}							
-							// btn.style.position = "relative"
-							btn.innerText = "Show less";
-							document.querySelector('.gallery_f_inner.row.imageGallery1').style.height= "100%";
+						var i = 0;
+						while(wrapper[i]) {
+							wrapper[i].style.display = 'block';
+							wrapper[i].style.position = 'static';
+							i++;
 						}
-						else{
-							var i = 6;
-							while(wrapper[i]){
-								wrapper[i].style.display = 'none';
-								i++;
-							}
-							btn.innerText = "Load More Items";
-							document.querySelector('.gallery_f_inner.row.imageGallery1').style.height= "100%";
-
-						}
+						btn.style.display = 'none';
+						document.querySelector('.gallery_f_inner.row.imageGallery1').style.height= "100%";
 					})
 				</script>
         	</div>
@@ -651,7 +638,7 @@
 					</div>
 					<div class="row mt-5">
 						<div class="col-lg-12">
-							<form name="sentMessage" id="contactForm" novalidate>
+							<form name="sentMessage" id="contactForm" validate>
 								<div class="row">
 									<div class="col-md-6">
 										<div class="form-group">
@@ -676,7 +663,7 @@
 									<div class="clearfix"></div>
 									<div class="col-lg-12 text-center">
 										<div id="success"></div>
-										<button type="submit" class="btn btn-xl btn-primary">Send Message</button>
+										<button type="submit" class="btn btn-xl btn-primary" onclick="myFunctionn()">Send Message</button>
 									</div>
 								</div>
 							</form>
