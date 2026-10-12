@@ -88,7 +88,19 @@ function setProgress(fraction, message) {
 
 function normalizeError(error) {
   if (typeof error === "string") return error;
-  return error?.message || "Unknown error";
+  const messages = [
+    error?.message,
+    error?.details,
+    error?.error_description,
+    typeof error?.error === "string" ? error.error : error?.error?.message,
+    error?.result?.error?.message,
+  ].filter(Boolean);
+  if (messages.length) return [...new Set(messages)].join(" — ");
+  try {
+    return JSON.stringify(error);
+  } catch {
+    return "Unknown error";
+  }
 }
 
 function initializeMap() {
