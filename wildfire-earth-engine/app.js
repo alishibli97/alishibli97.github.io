@@ -9,6 +9,30 @@ const CLOUD_SCORE_THRESHOLD = 0.60;
 const REFLECTANCE_SCALE = 5000;
 const TILE_SIZE = 256;
 const TILE_OVERLAP = 32;
+const DATASET_BANDS = ["B12", "B8", "B4"];
+
+const SCENE_PRESETS = Object.freeze({
+  US_2017_AZ3442311084220170601: {
+    latitude: 34.400141, longitude: -110.841913, roiKm: 7.84,
+    ignition: "2017-06-01", target: "2017-06-29", areaHa: 8013,
+  },
+  US_2018_CA4114012366020180816: {
+    latitude: 41.140505, longitude: -123.652970, roiKm: 6.56,
+    ignition: "2018-08-16", target: "2018-09-25", areaHa: 9869,
+  },
+  US_2020_OR4403912052820200816: {
+    latitude: 44.028087, longitude: -120.500682, roiKm: 6.56,
+    ignition: "2020-08-16", target: "2020-09-29", areaHa: 9751,
+  },
+  US_2022_MO3793309102520220328: {
+    latitude: 37.956501, longitude: -91.006369, roiKm: 6.72,
+    ignition: "2022-03-28", target: "2022-04-23", areaHa: 9830,
+  },
+  US_2023_OR4242612068520230918: {
+    latitude: 42.413549, longitude: -120.661961, roiKm: 5.60,
+    ignition: "2023-09-18", target: "2023-10-06", areaHa: 5812,
+  },
+});
 
 const state = {
   eeConnected: false,
@@ -33,6 +57,8 @@ const elements = {
   connectButton: document.querySelector("#connect-button"),
   eeStatus: document.querySelector("#ee-status"),
   connectionMessage: document.querySelector("#connection-message"),
+  scenePreset: document.querySelector("#scene-preset"),
+  presetMeta: document.querySelector("#preset-meta"),
   latitude: document.querySelector("#latitude"),
   longitude: document.querySelector("#longitude"),
   roiSize: document.querySelector("#roi-size"),
@@ -41,6 +67,8 @@ const elements = {
   targetDate: document.querySelector("#target-date"),
   preWindow: document.querySelector("#pre-window"),
   targetWindow: document.querySelector("#target-window"),
+  mapWorkspace: document.querySelector("#map-workspace"),
+  mapExpand: document.querySelector("#map-expand"),
   mapCoordinate: document.querySelector("#map-coordinate"),
   runButton: document.querySelector("#run-button"),
   progressWrap: document.querySelector("#progress-wrap"),
@@ -119,6 +147,7 @@ function initializeMap() {
   state.map.on("click", event => {
     elements.latitude.value = event.latlng.lat.toFixed(5);
     elements.longitude.value = event.latlng.lng.toFixed(5);
+    markSceneCustom("Custom scene · map center selected manually; adjust its dates at right.");
     updateMapSelection(false);
   });
 }
@@ -142,6 +171,51 @@ function updateMapSelection(pan = true) {
   elements.roiValue.value = `${Number(elements.roiSize.value).toFixed(2)} km`;
   elements.mapCoordinate.textContent = `${latitude.toFixed(4)}, ${longitude.toFixed(4)}`;
   if (pan) state.map.panTo([latitude, longitude]);
+}
+
+function markSceneCustom(message = "Custom scene · coordinates, dates, or ROI adjusted manually.") {
+  elements.scenePreset.value = "";
+  elements.presetMeta.textContent = message;
+}
+
+function applyScenePreset(eventId) {
+  const preset = SCENE_PRESETS[eventId];
+  if (!preset) return;
+  elements.latitude.value = preset.latitude;
+  elements.longitude.value = preset.longitude;
+  elements.roiSize.value = preset.roiKm;
+  elements.ignitionDate.value = preset.ignition;
+  elements.targetDate.value = preset.target;
+  elements.presetMeta.textContent = `${eventId} · Trees majority · ${preset.areaHa.toLocaleString()} ha · target date drawn from its downloaded progression`;
+  updateMapSelection(false);
+  state.map.fitBounds(roiBounds(preset.latitude, preset.longitude), { padding: [45, 45], maxZoom: 12 });
+}
+
+function setMapExpanded(expanded) {
+  elements.mapWorkspace.classList.toggle("is-map-expanded", expanded && !document.fullscreenElement);
+  document.body.classList.toggle("map-expanded", expanded);
+  elements.mapExpand.setAttribute("aria-pressed", String(expanded));
+  elements.mapExpand.querySelector("span").textContent = expanded ? "Exit enlarged map" : "Enlarge map";
+  setTimeout(() => state.map.invalidateSize(), 80);
+}
+
+async function toggleMapWorkspace() {
+  const fallbackExpanded = elements.mapWorkspace.classList.contains("is-map-expanded");
+  if (document.fullscreenElement === elements.mapWorkspace) {
+    await document.exitFullscreen();
+    return;
+  }
+  if (fallbackExpanded) {
+    setMapExpanded(false);
+    return;
+  }
+  if (elements.mapWorkspace.requestFullscreen) {
+    try {
+      await elements.mapWorkspace.requestFullscreen();
+      return;
+    } catch (_) { /* Fall back to an in-page enlarged view. */ }
+  }
+  setMapExpanded(true);
 }
 
 function initializeEarthEngine(projectId) {
@@ -355,7 +429,7 @@ function chooseImage(collection) {
 }
 
 function prepareImage(image, prefix) {
-  const spectral = image.select(["B12", "B8", "B4"]).clamp(0, REFLECTANCE_SCALE).int16();
+  const spectral = image.select(DATASET_BANDS).clamp(0, REFLECTANCE_SCALE).int16();
   const clear = image.select("cloud_mask").unmask(0).uint8();
   return spectral.addBands(clear).rename([
     `${prefix}_swir2`, `${prefix}_nir`, `${prefix}_red`, `${prefix}_clear`,
@@ -644,9 +718,25 @@ function downloadSourceStack() {
 
 elements.connectButton.addEventListener("click", connectEarthEngine);
 elements.runButton.addEventListener("click", runEarthEngineWorkflow);
-elements.latitude.addEventListener("change", () => updateMapSelection());
-elements.longitude.addEventListener("change", () => updateMapSelection());
-elements.roiSize.addEventListener("input", () => updateMapSelection(false));
+elements.scenePreset.addEventListener("change", event => applyScenePreset(event.target.value));
+elements.latitude.addEventListener("change", () => {
+  markSceneCustom();
+  updateMapSelection();
+});
+elements.longitude.addEventListener("change", () => {
+  markSceneCustom();
+  updateMapSelection();
+});
+elements.roiSize.addEventListener("input", () => {
+  markSceneCustom();
+  updateMapSelection(false);
+});
+elements.ignitionDate.addEventListener("change", () => markSceneCustom());
+elements.targetDate.addEventListener("change", () => markSceneCustom());
+elements.mapExpand.addEventListener("click", toggleMapWorkspace);
+document.addEventListener("fullscreenchange", () => {
+  setMapExpanded(document.fullscreenElement === elements.mapWorkspace);
+});
 elements.threshold.addEventListener("input", () => state.probability && renderResults());
 elements.downloadMask.addEventListener("click", downloadMask);
 elements.downloadStack.addEventListener("click", downloadSourceStack);
@@ -654,4 +744,4 @@ elements.downloadStack.addEventListener("click", downloadSourceStack);
 elements.projectId.value = localStorage.getItem("wildfire-ee-project") || elements.projectId.value;
 elements.clientId.value = localStorage.getItem("wildfire-ee-client-id") || "";
 initializeMap();
-updateMapSelection(false);
+applyScenePreset(elements.scenePreset.value);

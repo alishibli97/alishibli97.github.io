@@ -14,20 +14,14 @@
 <body>
   <header class="site-header">
     <a class="wordmark" href="../"><span aria-hidden="true">AS</span> Ali Shibli</a>
-    <nav><a href="../wildfire-demo/">Upload GeoTIFFs</a><a class="back-link" href="../">Portfolio ↗</a></nav>
+    <nav><a href="../#projects">Projects</a><a href="../wildfire-demo/">Upload GeoTIFFs</a><a class="back-link" href="../">Portfolio ↗</a></nav>
   </header>
 
   <main>
-    <section class="hero ee-hero">
-      <div class="eyebrow"><span></span> Live Sentinel-2 · In-browser inference</div>
-      <h1>Earth Engine<br><em>Wildfire Lab</em></h1>
-      <p class="lede">Choose a location and dates. Google Earth Engine finds clear Sentinel-2 observations on demand; the burned-area model then runs locally in your browser.</p>
-      <div class="model-facts" aria-label="Workflow details">
-        <div><strong>Live</strong><span>Earth Engine catalog</span></div>
-        <div><strong>20 m</strong><span>analysis grid</span></div>
-        <div><strong>0.60</strong><span>Cloud Score+ cutoff</span></div>
-        <div><strong>Local</strong><span>model inference</span></div>
-      </div>
+    <section class="tool-intro">
+      <p>Research tool · Sentinel-2 B12/B8/B4 · 20 m</p>
+      <h1>Wildfire progression from live Earth Engine imagery</h1>
+      <span>Select a known dataset event or define a scene, then run the model locally in your browser.</span>
     </section>
 
     <section class="workspace connection" aria-labelledby="connection-title">
@@ -57,20 +51,36 @@
         <div><p>02 / Area and dates</p><h2 id="explorer-title">Choose the fire scene</h2></div>
         <p class="section-note">Click the map or enter coordinates.</p>
       </div>
-      <div class="explorer-grid">
+
+      <div class="example-picker">
+        <label for="scene-preset"><span>Examples from the forest-fire dataset</span>
+          <select id="scene-preset">
+            <option value="" disabled>Custom scene</option>
+            <option value="US_2017_AZ3442311084220170601">2017 · Arizona · 8,013 ha</option>
+            <option value="US_2018_CA4114012366020180816">2018 · California · 9,869 ha</option>
+            <option value="US_2020_OR4403912052820200816">2020 · Oregon · 9,751 ha</option>
+            <option value="US_2022_MO3793309102520220328">2022 · Missouri · 9,830 ha</option>
+            <option value="US_2023_OR4242612068520230918" selected>2023 · Oregon · 5,812 ha</option>
+          </select>
+        </label>
+        <p id="preset-meta">US_2023_OR4242612068520230918 · Trees majority · target date drawn from its downloaded progression</p>
+      </div>
+
+      <div class="explorer-grid" id="map-workspace">
         <div class="map-wrap">
           <div id="map" aria-label="Map for selecting the wildfire location"></div>
-          <div class="map-caption"><span>OpenStreetMap</span><b id="map-coordinate">40.5853, −105.0844</b></div>
+          <button id="map-expand" class="map-expand" type="button" aria-pressed="false"><span>Enlarge map</span><b aria-hidden="true">⛶</b></button>
+          <div class="map-caption"><span>OpenStreetMap · click to move ROI</span><b id="map-coordinate">42.4135, −120.6620</b></div>
         </div>
         <div class="controls-panel">
           <div class="field-pair">
-            <label><span>Latitude</span><input id="latitude" type="number" step="0.0001" value="40.5853"></label>
-            <label><span>Longitude</span><input id="longitude" type="number" step="0.0001" value="-105.0844"></label>
+            <label><span>Latitude</span><input id="latitude" type="number" step="0.0001" value="42.413549"></label>
+            <label><span>Longitude</span><input id="longitude" type="number" step="0.0001" value="-120.661961"></label>
           </div>
-          <label><span>ROI width <output id="roi-value">5.12 km</output></span><input id="roi-size" type="range" min="2.56" max="10" value="5.12" step="0.16"></label>
+          <label><span>ROI width <output id="roi-value">5.60 km</output></span><input id="roi-size" type="range" min="2.56" max="10" value="5.60" step="0.16"></label>
           <div class="field-pair">
-            <label><span>Ignition date</span><input id="ignition-date" type="date" value="2024-03-12"></label>
-            <label><span>Target observation</span><input id="target-date" type="date" value="2024-03-25"></label>
+            <label><span>Ignition date</span><input id="ignition-date" type="date" value="2023-09-18"></label>
+            <label><span>Target observation</span><input id="target-date" type="date" value="2023-10-06"></label>
           </div>
           <div class="field-pair compact-fields">
             <label><span>Pre-fire lookback</span><select id="pre-window"><option value="30" selected>30 days</option><option value="45">45 days</option><option value="60">60 days</option></select></label>
@@ -96,6 +106,10 @@
         </div>
       </div>
 
+      <div class="band-key" aria-label="Sentinel-2 dataset band order">
+        <span><b>B12</b> SWIR2 → red</span><span><b>B8</b> NIR → green</span><span><b>B4</b> Red → blue</span>
+      </div>
+
       <div class="selection-summary">
         <article><span>Selected pre-fire</span><strong id="pre-date-summary">—</strong><small id="pre-clear-summary">—</small></article>
         <article><span>Selected current</span><strong id="current-date-summary">—</strong><small id="current-clear-summary">—</small></article>
@@ -104,8 +118,8 @@
       </div>
 
       <div class="canvas-grid">
-        <figure><div class="canvas-shell"><canvas id="pre-canvas"></canvas></div><figcaption><b>Selected pre-fire</b><span>SWIR2 / NIR / Red</span></figcaption></figure>
-        <figure><div class="canvas-shell"><canvas id="current-canvas"></canvas></div><figcaption><b>Selected current</b><span>SWIR2 / NIR / Red</span></figcaption></figure>
+        <figure><div class="canvas-shell"><canvas id="pre-canvas"></canvas></div><figcaption><b>Selected pre-fire</b><span>B12 / B8 / B4 · dataset order</span></figcaption></figure>
+        <figure><div class="canvas-shell"><canvas id="current-canvas"></canvas></div><figcaption><b>Selected current</b><span>B12 / B8 / B4 · dataset order</span></figcaption></figure>
         <figure><div class="canvas-shell"><canvas id="probability-canvas"></canvas></div><figcaption><b>Burn probability</b><span>Black → orange → white</span></figcaption></figure>
         <figure><div class="canvas-shell"><canvas id="mask-canvas"></canvas></div><figcaption><b>Binary prediction</b><span>White burned · black unburned · grey invalid</span></figcaption></figure>
       </div>
