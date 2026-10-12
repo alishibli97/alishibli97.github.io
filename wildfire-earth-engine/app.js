@@ -13,6 +13,7 @@ const TILE_OVERLAP = 32;
 const state = {
   eeConnected: false,
   authPopupReady: false,
+  authAttempt: 0,
   modelSession: null,
   inferenceEngine: null,
   pre: null,
@@ -172,34 +173,63 @@ function connectEarthEngine() {
   }
   localStorage.setItem("wildfire-ee-project", projectId);
   localStorage.setItem("wildfire-ee-client-id", clientId);
+
+  if (state.authPopupReady) {
+    state.authPopupReady = false;
+    elements.connectButton.disabled = true;
+    setEeStatus("Sign-in opening", "loading");
+    setMessage("Opening Google authorization… Allow the popup if your browser asks.", false, true);
+    window.ee.data.authenticateViaPopup(
+      () => initializeEarthEngine(projectId),
+      error => {
+        elements.connectButton.disabled = false;
+        elements.connectButton.querySelector("span").textContent = "Continue with Google";
+        state.authPopupReady = true;
+        setEeStatus("Authorization failed");
+        setMessage(`Google authorization failed: ${normalizeError(error)}`, true, true);
+      },
+    );
+    return;
+  }
+
   elements.connectButton.disabled = true;
   setEeStatus("Authorizing", "loading");
   setMessage("Checking for an existing Google authorization…", false, true);
+  const attempt = ++state.authAttempt;
+  let fallbackTimer;
+  const offerPopup = (message = "Click “Continue with Google” to open the authorization window.") => {
+    if (attempt !== state.authAttempt || state.eeConnected) return;
+    state.authPopupReady = true;
+    elements.connectButton.disabled = false;
+    elements.connectButton.querySelector("span").textContent = "Continue with Google";
+    setEeStatus("Sign-in required");
+    setMessage(message, false, true);
+  };
   const success = () => {
+    clearTimeout(fallbackTimer);
+    if (attempt !== state.authAttempt) return;
     state.authPopupReady = false;
     initializeEarthEngine(projectId);
   };
   const failure = error => {
+    clearTimeout(fallbackTimer);
+    if (attempt !== state.authAttempt) return;
     state.authPopupReady = false;
     elements.connectButton.disabled = false;
     setEeStatus("Authorization failed");
     setMessage(`Google authorization failed: ${normalizeError(error)}`, true, true);
   };
-  if (state.authPopupReady) {
-    window.ee.data.authenticateViaPopup(success, failure);
-    return;
-  }
+  fallbackTimer = setTimeout(() => {
+    offerPopup("The silent sign-in check took too long. Click “Continue with Google” to authorize directly.");
+  }, 8000);
   window.ee.data.authenticateViaOauth(
     clientId,
     success,
     failure,
     [EE_SCOPE],
     () => {
-      state.authPopupReady = true;
-      elements.connectButton.disabled = false;
-      elements.connectButton.querySelector("span").textContent = "Continue with Google";
-      setEeStatus("Sign-in required");
-      setMessage("Click “Continue with Google” to open the authorization window.", false, true);
+      clearTimeout(fallbackTimer);
+      offerPopup();
     },
     true,
   );
