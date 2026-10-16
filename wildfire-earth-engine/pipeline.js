@@ -36,6 +36,46 @@ export function convertChannel(source, { fill, scale, clip, nodata }) {
   return out;
 }
 
+/**
+ * convertChannel, writing into a sub-rectangle of a larger plane.
+ *
+ * Earth Engine refuses a computePixels response over 32 MiB, so a detail window
+ * wider than ~1024 px has to be fetched as several requests and reassembled.
+ * This places one response's band into the full-size plane at (row, col).
+ */
+export function blitChannel(source, target, opts, geom) {
+  const { targetWidth, chunkWidth, chunkHeight, row, col } = geom;
+  const { fill, scale, clip, nodata } = opts;
+  for (let y = 0; y < chunkHeight; y += 1) {
+    const from = y * chunkWidth;
+    const to = (row + y) * targetWidth + col;
+    for (let x = 0; x < chunkWidth; x += 1) {
+      const raw = Number(source[from + x]);
+      if (!Number.isFinite(raw) || raw <= nodata + 1) {
+        target[to + x] = fill;
+        continue;
+      }
+      const value = raw * scale;
+      target[to + x] = clip === null ? value : Math.min(clip, Math.max(0, value));
+    }
+  }
+  return target;
+}
+
+/**
+ * Split a square window of `pixels` cells into chunks no larger than `maxChunk`,
+ * as evenly as possible so no request is a thin sliver.
+ *
+ * Returns the cut positions, so consecutive pairs are each chunk's extent:
+ * chunkEdges(9, 4) is [0, 3, 6, 9]. Every pixel falls in exactly one chunk.
+ */
+export function chunkEdges(pixels, maxChunk) {
+  const count = Math.ceil(pixels / maxChunk);
+  const edges = [0];
+  for (let i = 1; i <= count; i += 1) edges.push(Math.round(pixels * i / count));
+  return edges;
+}
+
 /** _normalise: (x - mean) / (std + 1e-6), per channel. */
 export function standardise(channels, mean, std) {
   return channels.map((source, channel) => {
@@ -45,6 +85,43 @@ export function standardise(channels, mean, std) {
     for (let i = 0; i < source.length; i += 1) target[i] = (source[i] - m) / s;
     return target;
   });
+}
+
+/**
+ * _normalise in place, overwriting the reflectance arrays.
+ *
+ * A wide detail window is the deployment's memory ceiling: at 4096 px the eight
+ * float32 planes are already 537 MB, and keeping a standardised copy as well
+ * would double that. Anything that needs the raw values — the cloud mask off
+ * cs_cdf, the false-colour stretch — has to be computed before this runs.
+ */
+export function standardiseInto(channels, mean, std) {
+  channels.forEach((plane, channel) => {
+    const m = mean[channel];
+    const s = std[channel] + 1e-6;
+    for (let i = 0; i < plane.length; i += 1) plane[i] = (plane[i] - m) / s;
+  });
+  return channels;
+}
+
+/**
+ * Pixels both phases saw through, from the raw (unstandardised) clear scores.
+ *
+ * A pixel either phase could not see counts as no observation at all: the
+ * product reports it as obscured and excludes it, rather than scoring it as
+ * unburned. Matches predict_fire.py's `keep`.
+ */
+export function cloudKeepMask(preCs, postCs, threshold) {
+  // Compare at float32, which is what numpy does on the research side: a
+  // Float32Array holds 0.65 as 0.64999997, so testing it against the double
+  // 0.65 would reject a pixel the reference keeps. Reachable in real data —
+  // cs_cdf arrives quantised to 1e-4, so exactly 0.65 does occur.
+  const cut = Math.fround(threshold);
+  const keep = new Uint8Array(preCs.length);
+  for (let i = 0; i < keep.length; i += 1) {
+    keep[i] = (preCs[i] >= cut && postCs[i] >= cut) ? 1 : 0;
+  }
+  return keep;
 }
 
 /** eval_miou.py's gaussian_weight: sigma = size / 4, centred on size / 2. */

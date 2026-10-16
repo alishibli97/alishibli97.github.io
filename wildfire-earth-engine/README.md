@@ -5,9 +5,10 @@ model. Earth Engine supplies a pre/post Sentinel-2 pair, `onnxruntime-web` runs
 the trained network on it, and the map is produced without any imagery or
 result leaving the machine.
 
-The application framework — the page, the Earth Engine OAuth flow, the map and
-the canvas layout — is Ali Shibli's. This directory swaps in FlameNet-S2 and the
-preprocessing that model requires.
+The page design, the Earth Engine OAuth flow, the map and the canvas layout come
+from Ali Shibli's wildfire tool, which this repository is a fork of; `style.css`
+still imports that stylesheet from `../wildfire-demo/`. This directory swaps in
+FlameNet-S2 and the preprocessing that model requires.
 
 ```
 index.html      the page
@@ -75,10 +76,31 @@ The **detail window** (orange on the map) is what gets segmented at 20 m. The
 a whole fire tile, 35–154 km across, which is why the default is far larger than
 the detail window and why shrinking it changes the result.
 
-The detail window is capped at 1024 px because Earth Engine refuses a
-`computePixels` response over 32 MiB. Eight bands of `int16` at 1024² is ~17 MB;
-the reflectance DN are integers in the archive anyway, and quantising `cs_cdf`
-to 1e-4 moves that standardised channel by 1.5e-3.
+The detail window reaches **81.92 km (4096 px)**, which is what the fires this
+model is for actually need — the 2025 test-split scars run 55–75 km across. A
+single `computePixels` response is capped at 32 MiB, about 1024 px square with
+eight `int16` bands, so a wider window is fetched as a grid of requests and
+reassembled. That reassembly is byte-identical to the single request it
+replaces, checked directly against the API.
+
+Two things scale badly with the window, and both are handled rather than hoped
+about:
+
+- **Scene ranking.** Every candidate scene costs two `reduceRegion` calls, and a
+  wide window can have forty of them in flight; at a fixed fine scale Earth
+  Engine answers *"Too many concurrent aggregations"* and the run dies before any
+  imagery is fetched. The ranking scale therefore grows with the window, keeping
+  each reduction near 150×150 cells. This costs nothing real — over a 72 km
+  window the mean `cs_cdf` moves by 0.002 between 480 m and 1920 m, and these
+  numbers only rank scenes.
+- **Memory.** At 4096 px the eight `float32` planes are 537 MB, so the
+  reflectance is standardised *in place* and the false-colour panels are
+  rasterised to their canvases before that happens. The slider shows the request
+  count, window count and memory for the size chosen, and warns past 2048 px.
+
+For reference, the largest preset (71.68 km, 3584 px) is 16 Earth Engine
+requests totalling ~140 MB, 729 model windows and ~525 MB resident. That is tens
+of seconds on WebGPU and minutes on WebAssembly.
 
 ### The one approximation
 
@@ -103,7 +125,8 @@ npm test
   `remove_small_cc` and `predict_fire.py`'s sliding window.
 - **`test/wiring.test.mjs`** checks that `app.js` and `index.html` still agree
   about every element id, and that no control of the upstream page survives in
-  half-edited form.
+  half-edited form. A renamed id otherwise fails at run time, in a handler,
+  possibly only on an error path.
 - **`test/endtoend.test.mjs`** runs the deployment's own window loop over the
   real ONNX graphs under `onnxruntime-web` and compares the burned area to what
   `scripts/predict_fire.py` reports for the same tile. It needs a fixture of a

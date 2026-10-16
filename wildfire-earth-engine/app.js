@@ -50,9 +50,9 @@
 
 import { fromArrayBuffer } from "https://cdn.jsdelivr.net/npm/geotiff@2.1.3/+esm";
 import {
-  blendWindow, convertChannel, extractPatch, falseColour, gaussianWeight,
-  jointRamp, normaliseBlend, removeSmallComponents, sampleContext, standardise,
-  windowStarts,
+  blendWindow, blitChannel, chunkEdges, cloudKeepMask, convertChannel, extractPatch,
+  falseColour, gaussianWeight, jointRamp, normaliseBlend, removeSmallComponents,
+  sampleContext, standardise, standardiseInto, windowStarts,
 } from "./pipeline.js";
 
 const MODEL_DIR = "./model/";
@@ -60,10 +60,15 @@ const ORT_ASSET_PATH = "https://cdn.jsdelivr.net/npm/onnxruntime-web@1.23.2/dist
 const EE_SCOPE = "https://www.googleapis.com/auth/earthengine.readonly";
 
 // Earth Engine refuses a computePixels response over 32 MiB. The detail window
-// is eight bands of int16, so 1024 px squared is ~17 MB and leaves headroom;
-// the reflectance DN are integers in the archive anyway and cs_cdf quantised to
-// 1e-4 moves a standardised channel by 1.5e-3.
-const DETAIL_MAX_PX = 1024;
+// is eight bands of int16, so ~1024 px square is the most one request can carry
+// (17 MB, with headroom); the reflectance DN are integers in the archive anyway
+// and cs_cdf quantised to 1e-4 moves a standardised channel by 1.5e-3.
+const DETAIL_CHUNK_PX = 1024;
+// The window itself is tiled across as many requests as it needs, so the real
+// ceiling is browser memory, not the response cap. At 4096 px the eight float32
+// planes are 537 MB before the accumulators, which is why the reflectance is
+// standardised in place and why the slider warns past 2048 px.
+const DETAIL_MAX_PX = 4096;
 const CS_QUANT = 10000;
 const NODATA = -9999;
 
@@ -77,21 +82,21 @@ const SCENE_PRESETS = Object.freeze({
   CA_2025_SK_433: {
     label: "2025 · Saskatchewan · 170,576 ha",
     latitude: 54.8299, longitude: -102.3205,
-    detailKm: 20.48, contextKm: 70,
+    detailKm: 71.68, contextKm: 100,
     pre: "2024-09-15", target: "2025-11-04",
     note: "NBAC test split · boreal forest · model never saw 2025",
   },
   CA_2025_AB_480: {
     label: "2025 · Alberta · 119,527 ha",
     latitude: 56.9163, longitude: -113.6742,
-    detailKm: 20.48, contextKm: 60,
+    detailKm: 58.88, contextKm: 80,
     pre: "2024-08-11", target: "2025-10-15",
     note: "NBAC test split · mixed boreal · model never saw 2025",
   },
   CA_2025_ON_594: {
     label: "2025 · Ontario · 159,734 ha",
     latitude: 52.8423, longitude: -93.8993,
-    detailKm: 20.48, contextKm: 68,
+    detailKm: 69.12, contextKm: 96,
     pre: "2024-06-10", target: "2025-08-31",
     note: "NBAC test split · boreal shield · model never saw 2025",
   },
@@ -100,7 +105,7 @@ const SCENE_PRESETS = Object.freeze({
   CA_2026_BC_K70748: {
     label: "2026 · BC · K70748 · 61,009 ha perimeter",
     latitude: 51.2716, longitude: -122.3370,
-    detailKm: 20.48, contextKm: 54,
+    detailKm: 56.32, contextKm: 76,
     pre: "2025-08-22", target: "2026-09-16",
     note: "Independent validation fire · no NBAC mask · union recall 0.912, "
         + "precision 0.961 after attributing neighbouring fires",
@@ -111,7 +116,7 @@ const SCENE_PRESETS = Object.freeze({
   ID_2026_KETAPANG: {
     label: "2026 · Ketapang, Kalimantan · out of domain",
     latitude: -1.7500, longitude: 110.1300,
-    detailKm: 20.48, contextKm: 36,
+    detailKm: 35.84, contextKm: 50,
     pre: "2025-10-07", target: "2026-09-02",
     note: "Out-of-domain transfer · tropical peatland · dNBR-corroborated, "
         + "no burned-area reference exists for Aug-Oct 2026",
@@ -134,7 +139,7 @@ const state = {
   keep: null,         // null when the run is 3-channel or masking is disabled
   geometry: null,
   selected: null,
-  sourceBlob: null,
+  sourceBlobs: null,   // one per computePixels request the window needed
   map: null,
   marker: null,
   detailRect: null,
@@ -151,7 +156,7 @@ for (const id of [
   "message", "results", "threshold", "threshold-value", "pre-date-summary",
   "pre-clear-summary", "current-date-summary", "current-clear-summary",
   "lag-summary", "engine-summary", "burned-summary", "pixel-summary",
-  "obscured-summary", "obscured-detail", "pre-canvas", "current-canvas",
+  "obscured-summary", "obscured-detail", "window-cost", "pre-canvas", "current-canvas",
   "probability-canvas", "mask-canvas", "download-mask", "download-stack",
   "model-summary",
 ]) {
@@ -263,7 +268,29 @@ function updateMapSelection(pan = true) {
   elements.detailValue.value = `${detailKm().toFixed(2)} km · ${px}×${px} px`;
   elements.contextValue.value = `${contextKm().toFixed(0)} km`;
   elements.mapCoordinate.textContent = `${latitude.toFixed(4)}, ${longitude.toFixed(4)}`;
+  updateWindowCost(px);
   if (pan) state.map.panTo([latitude, longitude]);
+}
+
+/**
+ * What the chosen window will cost, before the user spends it.
+ *
+ * A wide window is several Earth Engine requests and hundreds of model windows,
+ * so the run can take minutes and hundreds of megabytes. Saying so up front is
+ * cheaper than letting someone drag the slider to the top and wait.
+ */
+function updateWindowCost(px) {
+  if (!state.meta) return;
+  const meta = state.meta;
+  const chunks = Math.ceil(px / DETAIL_CHUNK_PX) ** 2;
+  const windows = Math.ceil(Math.max(1, (px - meta.patch_size) / meta.stride) + 1) ** 2;
+  const planesMb = (px * px * 2 * meta.in_ch_per_phase * 4) / 2 ** 20;
+  const heavy = px > 2048;
+  elements.windowCost.textContent =
+    `${chunks} Earth Engine request${chunks === 1 ? "" : "s"} · ${windows} model `
+    + `window${windows === 1 ? "" : "s"} · ~${Math.round(planesMb)} MB in memory`
+    + (heavy ? " · minutes on WebAssembly, and a lot of RAM" : "");
+  elements.windowCost.classList.toggle("is-heavy", heavy);
 }
 
 function detailPixels() {
@@ -499,16 +526,18 @@ function datatakeScenes(roi, start, end) {
  * best. Clarity decides, with the earliest date as the tiebreak; proximity to
  * the requested date is handled by keeping the search window narrow instead.
  */
-function scoreScenes(collection, roi) {
+function scoreScenes(collection, roi, scoreScale) {
   const ee = window.ee;
   const meta = state.meta;
   return collection.map(image => {
     const img = ee.Image(image);
     const clear = img.select(meta.qa_band).reduceRegion({
-      reducer: ee.Reducer.mean(), geometry: roi, scale: 120, maxPixels: 1e8, bestEffort: true,
+      reducer: ee.Reducer.mean(), geometry: roi, scale: scoreScale,
+      maxPixels: 1e8, bestEffort: true,
     }).get(meta.qa_band);
     const covered = img.select("B12").mask().reduceRegion({
-      reducer: ee.Reducer.mean(), geometry: roi, scale: 120, maxPixels: 1e8, bestEffort: true,
+      reducer: ee.Reducer.mean(), geometry: roi, scale: scoreScale,
+      maxPixels: 1e8, bestEffort: true,
     }).get("B12");
     const csMean = ee.Number(ee.Algorithms.If(clear, clear, 0));
     const coverage = ee.Number(ee.Algorithms.If(covered, covered, 0));
@@ -529,7 +558,23 @@ function pickScene(collection) {
   return ee.Image(pool.sort("usability", false).first());
 }
 
-async function selectScenes(roi, preDate, targetDate, preRadius, targetRadius) {
+/**
+ * The scale the scene-ranking reductions run at.
+ *
+ * Every candidate gets two reduceRegion calls, and a wide window can have 40 of
+ * them in flight: at a fixed fine scale Earth Engine answers "Too many
+ * concurrent aggregations" and the run dies before any imagery is fetched. The
+ * scale therefore grows with the window, keeping each reduction near 150x150
+ * cells whatever the extent. It costs nothing real — these numbers only rank
+ * scenes, and over a 72 km window the mean cs_cdf moves by 0.002 between 480 m
+ * and 1920 m.
+ */
+function scoringScale(detailPixels) {
+  const metres = detailPixels * state.meta.scale_m;
+  return Math.max(state.meta.scale_m * 6, Math.round(metres / 150));
+}
+
+async function selectScenes(roi, preDate, targetDate, preRadius, targetRadius, scoreScale) {
   const ee = window.ee;
   const window_ = (centre, radius) => [
     ee.Date(centre).advance(-radius, "day"), ee.Date(centre).advance(radius + 1, "day"),
@@ -546,8 +591,8 @@ async function selectScenes(roi, preDate, targetDate, preRadius, targetRadius) {
   if (!counts[1]) {
     throw new Error(`No Sentinel-2 scene within ±${targetRadius} days of ${targetDate}.`);
   }
-  const preImage = pickScene(scoreScenes(preAll, roi));
-  const postImage = pickScene(scoreScenes(postAll, roi));
+  const preImage = pickScene(scoreScenes(preAll, roi, scoreScale));
+  const postImage = pickScene(scoreScenes(postAll, roi, scoreScale));
   const metadata = await eeEvaluate(ee.Dictionary({
     pre_date: preImage.get("acquisition_day"),
     pre_cs: preImage.get("cs_mean"),
@@ -644,36 +689,111 @@ async function computePixels(image, grid, projectId, bands, tag) {
  * the channel mean (cs_cdf with 0, which reads as fully clouded rather than as
  * typically clear), then the reflectance channels clipped.
  */
-async function readStack(arrayBuffer, csScale) {
+/** How a band of the computePixels response is turned into reflectance. */
+function channelOptions(channel, csScale) {
   const meta = state.meta;
+  const isCs = meta.bands[channel] === meta.qa_band;
+  return {
+    fill: isCs ? 0 : meta.mean[channel],
+    scale: isCs ? 1 / csScale : meta.dn_scale,
+    clip: isCs ? null : meta.refl_clip,
+    nodata: NODATA,
+  };
+}
+
+async function readRasters(arrayBuffer) {
+  const expected = PHASES.length * state.meta.in_ch_per_phase;
   const tiff = await fromArrayBuffer(arrayBuffer);
   const image = await tiff.getImage();
-  const width = image.getWidth();
-  const height = image.getHeight();
   const samples = image.getSamplesPerPixel();
-  const expected = PHASES.length * meta.in_ch_per_phase;
   if (samples < expected) {
     throw new Error(`Earth Engine returned ${samples} bands; ${expected} were expected.`);
   }
-  const rasters = await image.readRasters({
-    samples: [...Array(expected).keys()], interleave: false,
-  });
-  const nChannels = meta.in_ch_per_phase;
-
-  const makePhase = offset => {
-    const channels = [];
-    for (let channel = 0; channel < nChannels; channel += 1) {
-      const isCs = meta.bands[channel] === meta.qa_band;
-      channels.push(convertChannel(rasters[offset + channel], {
-        fill: isCs ? 0 : meta.mean[channel],
-        scale: isCs ? 1 / csScale : meta.dn_scale,
-        clip: isCs ? null : meta.refl_clip,
-        nodata: NODATA,
-      }));
-    }
-    return { width, height, channels };
+  return {
+    width: image.getWidth(),
+    height: image.getHeight(),
+    bands: await image.readRasters({
+      samples: [...Array(expected).keys()], interleave: false,
+    }),
   };
+}
+
+/** One request's worth: used for the context thumbnail, which always fits. */
+async function readStack(arrayBuffer, csScale) {
+  const nChannels = state.meta.in_ch_per_phase;
+  const { width, height, bands } = await readRasters(arrayBuffer);
+  const makePhase = offset => ({
+    width, height,
+    channels: Array.from({ length: nChannels }, (_, c) =>
+      convertChannel(bands[offset + c], channelOptions(c, csScale))),
+  });
   return { pre: makePhase(0), post: makePhase(nChannels) };
+}
+
+/**
+ * Fetch the detail window, in as many computePixels requests as it takes.
+ *
+ * Earth Engine caps a response at 32 MiB, which with eight int16 bands is about
+ * 1024 px square — far smaller than the fires this model is for, whose scars
+ * run 55-75 km across. So the window is tiled, each chunk requested on its own
+ * grid cut from the same 20 m UTM lattice, and blitted into one set of planes.
+ * Because every chunk shares the parent grid's origin and scale, the reassembled
+ * raster is pixel-identical to the single request it replaces.
+ */
+async function fetchDetailWindow(image, grid, projectId, bands, csScale, onProgress) {
+  const meta = state.meta;
+  const pixels = grid.dimensions.width;
+  const a = grid.affineTransform;
+  const rows = chunkEdges(pixels, DETAIL_CHUNK_PX);
+  const cols = chunkEdges(pixels, DETAIL_CHUNK_PX);
+  const total = (rows.length - 1) * (cols.length - 1);
+
+  const nChannels = meta.in_ch_per_phase;
+  const plane = pixels * pixels;
+  const makePhase = () => ({
+    width: pixels, height: pixels,
+    channels: Array.from({ length: nChannels }, () => new Float32Array(plane)),
+  });
+  const pre = makePhase();
+  const post = makePhase();
+
+  const blobs = [];
+  let done = 0;
+  for (let r = 0; r < rows.length - 1; r += 1) {
+    for (let c = 0; c < cols.length - 1; c += 1) {
+      const row = rows[r];
+      const col = cols[c];
+      const chunkH = rows[r + 1] - row;
+      const chunkW = cols[c + 1] - col;
+      const chunkGrid = {
+        dimensions: { width: chunkW, height: chunkH },
+        affineTransform: {
+          ...a,
+          translateX: a.translateX + col * a.scaleX,
+          translateY: a.translateY + row * a.scaleY,
+        },
+        crsCode: grid.crsCode,
+      };
+      onProgress(done, total, `${chunkW}×${chunkH} px`);
+      const blob = await computePixels(image, chunkGrid, projectId, bands,
+        total > 1 ? `detail chunk ${done + 1}/${total}` : "detail");
+      blobs.push({ blob, row, col });
+      const raster = await readRasters(await blob.arrayBuffer());
+      if (raster.width !== chunkW || raster.height !== chunkH) {
+        throw new Error(`Earth Engine returned ${raster.width}×${raster.height} px for a `
+          + `${chunkW}×${chunkH} px chunk.`);
+      }
+      const geom = { targetWidth: pixels, chunkWidth: chunkW, chunkHeight: chunkH, row, col };
+      for (const [phase, offset] of [[pre, 0], [post, nChannels]]) {
+        for (let ch = 0; ch < nChannels; ch += 1) {
+          blitChannel(raster.bands[offset + ch], phase.channels[ch],
+            channelOptions(ch, csScale), geom);
+        }
+      }
+      done += 1;
+    }
+  }
+  return { pre, post, blobs, requests: total };
 }
 
 // ── inference ────────────────────────────────────────────────────────────────
@@ -705,9 +825,14 @@ async function runInference(geometry) {
   const stride = meta.stride;
   const { width, height } = state.post;
 
+  // In place: see the note in runWorkflow — at the top window size a second
+  // copy of the detail planes would be another 537 MB. Anything needing raw
+  // reflectance has already been computed by the time this runs.
+  const preNorm = standardiseInto(state.pre.channels, meta.mean, meta.std);
+  const postNorm = standardiseInto(state.post.channels, meta.mean, meta.std);
+
+  // The thumbnail is small, so it keeps the allocating version.
   const norm = phase => standardise(phase.channels, meta.mean, meta.std);
-  const preNorm = norm(state.pre);
-  const postNorm = norm(state.post);
 
   // Tile context: one pass over the context thumbnail, reused by every patch.
   const ctxPixels = meta.ctx_size * meta.ctx_size;
@@ -819,7 +944,8 @@ async function runWorkflow() {
     setProgress(0.1, `Searching ${meta.collection} and Cloud Score+…`);
     const selected = await selectScenes(
       roi, elements.preDate.value, elements.targetDate.value,
-      Number(elements.preWindow.value), Number(elements.targetWindow.value));
+      Number(elements.preWindow.value), Number(elements.targetWindow.value),
+      scoringScale(detailPx));
     state.selected = selected.metadata;
     setProgress(0.22,
       `Selected ${selected.metadata.pre_date} and ${selected.metadata.post_date}`);
@@ -827,12 +953,29 @@ async function runWorkflow() {
     const stack = stackPhases(selected.preImage, selected.postImage);
     const bands = bandIds();
 
-    setProgress(0.3, `Fetching ${detailPx}×${detailPx} px at ${meta.scale_m} m…`);
-    state.sourceBlob = await computePixels(
-      detailImage(stack), detailGrid, projectId, bands, "detail");
-    const detail = await readStack(await state.sourceBlob.arrayBuffer(), CS_QUANT);
+    const detail = await fetchDetailWindow(
+      detailImage(stack), detailGrid, projectId, bands, CS_QUANT,
+      (done, total, size) => setProgress(0.26 + 0.18 * done / total,
+        total > 1
+          ? `Fetching ${detailPx}×${detailPx} px at ${meta.scale_m} m — request `
+            + `${done + 1} of ${total} (${size})…`
+          : `Fetching ${detailPx}×${detailPx} px at ${meta.scale_m} m…`));
     state.pre = detail.pre;
     state.post = detail.post;
+    state.sourceBlobs = detail.blobs;
+
+    // Both of these need RAW reflectance, and runInference standardises the
+    // planes in place to avoid a second 537 MB copy at the top window size.
+    // So the cloud mask is taken now, and the two false-colour panels are
+    // rasterised to their canvases now rather than kept as arrays — the
+    // canvases are at most 900 px a side, where the planes are up to 4096.
+    state.keep = (meta.cloud_valid_cs > 0 && meta.in_ch_per_phase > 3)
+      ? cloudKeepMask(state.pre.channels[3], state.post.channels[3], meta.cloud_valid_cs)
+      : null;
+    const preRamp = jointRamp(state.pre.channels);
+    const postRamp = jointRamp(state.post.channels);
+    renderToCanvas(elements.preCanvas, i => falseColour(state.pre.channels, preRamp, i));
+    renderToCanvas(elements.currentCanvas, i => falseColour(state.post.channels, postRamp, i));
 
     setProgress(0.46, `Fetching the ${contextKm().toFixed(0)} km context thumbnail…`);
     const contextBlob = await computePixels(
@@ -856,19 +999,6 @@ async function runWorkflow() {
     setProgress(0.56, `Loading ${meta.name}…`);
     await createSessions();
     state.probability = await runInference(geometry);
-
-    // Pixels either phase could not see through carry no observation: the
-    // product reports them as obscured, it does not call them unburned.
-    state.keep = null;
-    if (meta.cloud_valid_cs > 0 && meta.in_ch_per_phase > 3) {
-      const preCs = state.pre.channels[3];
-      const postCs = state.post.channels[3];
-      const keep = new Uint8Array(preCs.length);
-      for (let i = 0; i < keep.length; i += 1) {
-        keep[i] = (preCs[i] >= meta.cloud_valid_cs && postCs[i] >= meta.cloud_valid_cs) ? 1 : 0;
-      }
-      state.keep = keep;
-    }
 
     renderResults();
     setProgress(1, "Earth Engine retrieval and inference complete");
@@ -945,10 +1075,9 @@ function renderResults() {
   elements.thresholdValue.value = threshold.toFixed(2);
   const mask = currentMask();
 
-  const preRamp = jointRamp(state.pre.channels);
-  const postRamp = jointRamp(state.post.channels);
-  renderToCanvas(elements.preCanvas, i => falseColour(state.pre.channels, preRamp, i));
-  renderToCanvas(elements.currentCanvas, i => falseColour(state.post.channels, postRamp, i));
+  // The two false-colour panels were rasterised in runWorkflow, while the
+  // reflectance was still raw; only the model's own outputs change with the
+  // threshold, so only these two are redrawn.
   renderToCanvas(elements.probabilityCanvas, i => state.keep && !state.keep[i]
     ? [86, 96, 92, 255]
     : [...probabilityColour(state.probability[i]), 255]);
@@ -1011,13 +1140,27 @@ function downloadMask() {
   }, "image/png");
 }
 
+/**
+ * The imagery the model was run on, as Earth Engine returned it.
+ *
+ * A window wider than one request comes back as several chunks, so each is
+ * offered separately, named by its pixel offset in the window. They share the
+ * parent grid, so gdal_merge or a VRT reassembles them exactly.
+ */
 function downloadSourceStack() {
-  if (!state.sourceBlob) return;
-  const link = document.createElement("a");
-  link.href = URL.createObjectURL(state.sourceBlob);
-  link.download = `s2_pair_${state.selected.pre_date}_${state.selected.post_date}.tif`;
-  link.click();
-  setTimeout(() => URL.revokeObjectURL(link.href), 1000);
+  const blobs = state.sourceBlobs;
+  if (!blobs?.length) return;
+  const stem = `s2_pair_${state.selected.pre_date}_${state.selected.post_date}`;
+  blobs.forEach(({ blob, row, col }, index) => {
+    // Browsers drop same-tick repeated downloads; space them out.
+    setTimeout(() => {
+      const link = document.createElement("a");
+      link.href = URL.createObjectURL(blob);
+      link.download = blobs.length === 1 ? `${stem}.tif` : `${stem}_r${row}_c${col}.tif`;
+      link.click();
+      setTimeout(() => URL.revokeObjectURL(link.href), 1000);
+    }, index * 400);
+  });
 }
 
 // ── wiring ───────────────────────────────────────────────────────────────────

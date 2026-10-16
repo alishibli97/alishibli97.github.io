@@ -19,3 +19,5 @@
 .site-header .wordmark{font-family:Manrope,sans-serif;font-size:15px;font-weight:800;letter-spacing:-.02em}
 footer{flex-wrap:wrap;gap:6px 24px}
 @media(max-width:560px){footer{flex-direction:column}}
+.window-cost{margin:-4px 0 0;padding:0 2px;color:var(--muted);font-size:10px;letter-spacing:.03em;line-height:1.5}
+.window-cost.is-heavy{color:var(--orange)}

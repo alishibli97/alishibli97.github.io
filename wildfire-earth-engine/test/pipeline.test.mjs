@@ -14,8 +14,9 @@ import { readFileSync } from "node:fs";
 import { test } from "node:test";
 
 import {
-  blendWindow, convertChannel, extractPatch, gaussianWeight, jointRamp,
-  normaliseBlend, removeSmallComponents, sampleContext, standardise,
+  blendWindow, blitChannel, chunkEdges, cloudKeepMask, convertChannel,
+  extractPatch, gaussianWeight, jointRamp, normaliseBlend,
+  removeSmallComponents, sampleContext, standardise, standardiseInto,
   windowStarts,
 } from "../pipeline.js";
 
@@ -43,11 +44,54 @@ test("convertChannel reproduces _read_tif's DN conversion and no-data fill", () 
   }
 });
 
+test("blitChannel reassembles a chunked window exactly", () => {
+  const spec = cases.blitChannel;
+  const target = new Float32Array(spec.targetWidth * spec.targetHeight);
+  for (const chunk of spec.chunks) {
+    blitChannel(Float32Array.from(chunk.source), target, spec.opts, {
+      targetWidth: spec.targetWidth,
+      chunkWidth: chunk.chunkWidth, chunkHeight: chunk.chunkHeight,
+      row: chunk.row, col: chunk.col,
+    });
+  }
+  closeTo(target, spec.expected, "blitChannel");
+
+  // The chunking itself: every pixel covered exactly once, no gaps, no overlap.
+  for (const [n, max] of [[7, 4], [9, 4], [1024, 1024], [2048, 1024], [3000, 1024], [4096, 1024]]) {
+    const edges = chunkEdges(n, max);
+    assert.equal(edges[0], 0, `chunkEdges(${n},${max}) must start at 0`);
+    assert.equal(edges.at(-1), n, `chunkEdges(${n},${max}) must end at ${n}`);
+    for (let i = 1; i < edges.length; i += 1) {
+      const span = edges[i] - edges[i - 1];
+      assert.ok(span > 0 && span <= max,
+        `chunkEdges(${n},${max}) span ${span} is out of range`);
+    }
+  }
+});
+
 test("standardise reproduces _normalise", () => {
   const spec = cases.standardise;
   const got = standardise(spec.channels.map(c => Float32Array.from(c)), spec.mean, spec.std);
   assert.equal(got.length, spec.expected.length);
   got.forEach((channel, i) => closeTo(channel, spec.expected[i], `standardise/ch${i}`, 1e-4));
+});
+
+test("standardiseInto matches standardise, in place", () => {
+  const spec = cases.standardise;
+  const planes = spec.channels.map(c => Float32Array.from(c));
+  const got = standardiseInto(planes, spec.mean, spec.std);
+  // Same answer as the allocating version…
+  got.forEach((channel, i) => closeTo(channel, spec.expected[i], `standardiseInto/ch${i}`, 1e-4));
+  // …and it really did overwrite, rather than quietly allocating.
+  got.forEach((channel, i) => assert.equal(channel, planes[i],
+    "standardiseInto returned new arrays; the memory saving is gone"));
+});
+
+test("cloudKeepMask reproduces predict_fire's keep", () => {
+  const spec = cases.cloudKeepMask;
+  const got = cloudKeepMask(Float32Array.from(spec.preCs),
+    Float32Array.from(spec.postCs), spec.threshold);
+  assert.deepEqual([...got], spec.expected, "cloudKeepMask");
 });
 
 test("gaussianWeight reproduces eval_miou.gaussian_weight", () => {
