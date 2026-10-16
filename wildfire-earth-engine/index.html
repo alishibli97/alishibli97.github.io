@@ -69,15 +69,14 @@
         <div class="map-wrap">
           <div id="map" aria-label="Map for selecting the wildfire location"></div>
           <button id="map-expand" class="map-expand" type="button" aria-pressed="false"><span>Enlarge map</span><b aria-hidden="true">⛶</b></button>
-          <div class="map-caption"><span>OpenStreetMap · orange = segmented at 20 m · dashed = context extent</span><b id="map-coordinate">51.2716, −122.3370</b></div>
+          <div class="map-caption"><span>OpenStreetMap · orange = the window, segmented at 20 m</span><b id="map-coordinate">51.2716, −122.3370</b></div>
         </div>
         <div class="controls-panel">
           <div class="field-pair">
             <label><span>Latitude</span><input id="latitude" type="number" step="0.0001" value="51.2716"></label>
             <label><span>Longitude</span><input id="longitude" type="number" step="0.0001" value="-122.3370"></label>
           </div>
-          <label><span>Detail window <output id="detail-value">20.48 km</output></span><input id="detail-size" type="range" min="5.12" max="81.92" value="61.44" step="2.56"></label>
-          <label><span>Context window <output id="context-value">54 km</output></span><input id="context-size" type="range" min="20" max="160" value="70" step="2"></label>
+          <label><span>Window <output id="detail-value">56.32 km</output></span><input id="detail-size" type="range" min="17.92" max="81.92" value="56.32" step="2.56"></label>
           <p class="window-cost" id="window-cost">—</p>
           <div class="field-pair">
             <label><span>Pre-fire date</span><input id="pre-date" type="date" value="2025-08-22"></label>

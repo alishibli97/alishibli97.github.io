@@ -82,21 +82,21 @@ const SCENE_PRESETS = Object.freeze({
   CA_2025_SK_433: {
     label: "2025 · Saskatchewan · 170,576 ha",
     latitude: 54.8299, longitude: -102.3205,
-    detailKm: 71.68, contextKm: 100,
+    detailKm: 71.68,
     pre: "2024-09-15", target: "2025-11-04",
     note: "NBAC test split · boreal forest · model never saw 2025",
   },
   CA_2025_AB_480: {
     label: "2025 · Alberta · 119,527 ha",
     latitude: 56.9163, longitude: -113.6742,
-    detailKm: 58.88, contextKm: 80,
+    detailKm: 58.88,
     pre: "2024-08-11", target: "2025-10-15",
     note: "NBAC test split · mixed boreal · model never saw 2025",
   },
   CA_2025_ON_594: {
     label: "2025 · Ontario · 159,734 ha",
     latitude: 52.8423, longitude: -93.8993,
-    detailKm: 69.12, contextKm: 96,
+    detailKm: 69.12,
     pre: "2024-06-10", target: "2025-08-31",
     note: "NBAC test split · boreal shield · model never saw 2025",
   },
@@ -105,7 +105,7 @@ const SCENE_PRESETS = Object.freeze({
   CA_2026_BC_K70748: {
     label: "2026 · BC · K70748 · 61,009 ha perimeter",
     latitude: 51.2716, longitude: -122.3370,
-    detailKm: 56.32, contextKm: 76,
+    detailKm: 56.32,
     pre: "2025-08-22", target: "2026-09-16",
     note: "Independent validation fire · no NBAC mask · union recall 0.912, "
         + "precision 0.961 after attributing neighbouring fires",
@@ -116,7 +116,7 @@ const SCENE_PRESETS = Object.freeze({
   ID_2026_KETAPANG: {
     label: "2026 · Ketapang, Kalimantan · out of domain",
     latitude: -1.7500, longitude: 110.1300,
-    detailKm: 35.84, contextKm: 50,
+    detailKm: 35.84,
     pre: "2025-10-07", target: "2026-09-02",
     note: "Out-of-domain transfer · tropical peatland · dNBR-corroborated, "
         + "no burned-area reference exists for Aug-Oct 2026",
@@ -143,14 +143,13 @@ const state = {
   map: null,
   marker: null,
   detailRect: null,
-  contextRect: null,
 };
 
 const elements = {};
 for (const id of [
   "project-id", "client-id", "connect-button", "ee-status", "connection-message",
   "scene-preset", "preset-meta", "latitude", "longitude", "detail-size",
-  "detail-value", "context-size", "context-value", "pre-date", "target-date",
+  "detail-value", "pre-date", "target-date",
   "pre-window", "target-window", "map-workspace", "map-expand", "map-coordinate",
   "run-button", "progress-wrap", "progress-text", "progress-value", "progress-bar",
   "message", "results", "threshold", "threshold-value", "pre-date-summary",
@@ -228,11 +227,6 @@ function initializeMap() {
   }).addTo(state.map);
   const icon = window.L.divIcon({ className: "roi-center-marker", iconSize: [15, 15] });
   state.marker = window.L.marker([latitude, longitude], { icon, interactive: false }).addTo(state.map);
-  // Two rectangles: the extent the context encoder sees, and the extent that is
-  // actually segmented at 20 m inside it.
-  state.contextRect = window.L.rectangle(squareBounds(latitude, longitude, contextKm()), {
-    color: "#8c9a94", weight: 1, dashArray: "5 4", fillOpacity: 0,
-  }).addTo(state.map);
   state.detailRect = window.L.rectangle(squareBounds(latitude, longitude, detailKm()), {
     color: "#ff6b35", weight: 2, fillColor: "#ff6b35", fillOpacity: 0.08,
   }).addTo(state.map);
@@ -245,7 +239,13 @@ function initializeMap() {
 }
 
 const detailKm = () => Number(elements.detailSize.value);
-const contextKm = () => Number(elements.contextSize.value);
+// The tile context encoder saw exactly the area being segmented — in training a
+// patch grid tiled a whole fire tile and the thumbnail was that same tile. A
+// context wider than the window is therefore not "more context", it is a
+// different distribution: on one 71.68 km run, stretching it to 100 km moved
+// the burned area from 234,774 ha to 257,344 ha, and shrinking it below the
+// window collapsed the periphery altogether. So it is not a control.
+const contextKm = () => detailKm();
 
 function squareBounds(latitude, longitude, sizeKm) {
   const halfKm = sizeKm / 2;
@@ -258,15 +258,10 @@ function updateMapSelection(pan = true) {
   const latitude = Number(elements.latitude.value);
   const longitude = Number(elements.longitude.value);
   if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) return;
-  // The context window must contain the detail window: the patch positions are
-  // normalised against it, and a patch outside it would sample clamped context.
-  if (contextKm() < detailKm()) elements.contextSize.value = detailKm();
   state.marker.setLatLng([latitude, longitude]);
   state.detailRect.setBounds(squareBounds(latitude, longitude, detailKm()));
-  state.contextRect.setBounds(squareBounds(latitude, longitude, contextKm()));
   const px = detailPixels();
   elements.detailValue.value = `${detailKm().toFixed(2)} km · ${px}×${px} px`;
-  elements.contextValue.value = `${contextKm().toFixed(0)} km`;
   elements.mapCoordinate.textContent = `${latitude.toFixed(4)}, ${longitude.toFixed(4)}`;
   updateWindowCost(px);
   if (pan) state.map.panTo([latitude, longitude]);
@@ -285,12 +280,21 @@ function updateWindowCost(px) {
   const chunks = Math.ceil(px / DETAIL_CHUNK_PX) ** 2;
   const windows = Math.ceil(Math.max(1, (px - meta.patch_size) / meta.stride) + 1) ** 2;
   const planesMb = (px * px * 2 * meta.in_ch_per_phase * 4) / 2 ** 20;
+
+  // patch_size / window_size is the scale the tile context is sampled at. In
+  // training a patch grid tiled a whole fire tile, which puts this between
+  // 0.047 and 0.289 — so a SMALL window is the off-distribution case here, not
+  // a large one, which is the opposite of what the control suggests.
+  const patchScale = meta.patch_size / px;
+  const offScale = patchScale > 0.29;
   const heavy = px > 2048;
   elements.windowCost.textContent =
     `${chunks} Earth Engine request${chunks === 1 ? "" : "s"} · ${windows} model `
-    + `window${windows === 1 ? "" : "s"} · ~${Math.round(planesMb)} MB in memory`
-    + (heavy ? " · minutes on WebAssembly, and a lot of RAM" : "");
-  elements.windowCost.classList.toggle("is-heavy", heavy);
+    + `window${windows === 1 ? "" : "s"} · ~${Math.round(planesMb)} MB in memory · `
+    + `context scale ${patchScale.toFixed(3)}`
+    + (offScale ? " — below the 17.9 km the model was trained at; results drift"
+      : (heavy ? " · minutes on WebAssembly, and a lot of RAM" : ""));
+  elements.windowCost.classList.toggle("is-heavy", heavy || offScale);
 }
 
 function detailPixels() {
@@ -310,12 +314,11 @@ function applyScenePreset(eventId) {
   elements.latitude.value = preset.latitude;
   elements.longitude.value = preset.longitude;
   elements.detailSize.value = preset.detailKm;
-  elements.contextSize.value = preset.contextKm;
   elements.preDate.value = preset.pre;
   elements.targetDate.value = preset.target;
   elements.presetMeta.textContent = `${eventId} · ${preset.note}`;
   updateMapSelection(false);
-  state.map.fitBounds(squareBounds(preset.latitude, preset.longitude, preset.contextKm),
+  state.map.fitBounds(squareBounds(preset.latitude, preset.longitude, preset.detailKm),
     { padding: [40, 40], maxZoom: 11 });
 }
 
@@ -904,7 +907,6 @@ function validateRunInputs() {
     throw new Error("Choose a valid pre-fire date and target observation.");
   }
   if (target <= pre) throw new Error("The target observation must be after the pre-fire date.");
-  if (contextKm() < detailKm()) throw new Error("The context window cannot be smaller than the detail window.");
   return { latitude, longitude, lagDays: Math.round((target - pre) / 86400000) };
 }
 
@@ -1174,12 +1176,10 @@ for (const field of [elements.latitude, elements.longitude]) {
     updateMapSelection();
   });
 }
-for (const field of [elements.detailSize, elements.contextSize]) {
-  field.addEventListener("input", () => {
-    markSceneCustom();
-    updateMapSelection(false);
-  });
-}
+elements.detailSize.addEventListener("input", () => {
+  markSceneCustom();
+  updateMapSelection(false);
+});
 elements.preDate.addEventListener("change", () => markSceneCustom());
 elements.targetDate.addEventListener("change", () => markSceneCustom());
 elements.mapExpand.addEventListener("click", toggleMapWorkspace);

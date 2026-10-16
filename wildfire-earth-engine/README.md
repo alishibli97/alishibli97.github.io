@@ -68,20 +68,49 @@ the fire stopped, so the gap between the two is routinely 14 months and can be
 Every preset carries the pre date the dataset loader itself selected for that
 fire, so the presets run on exactly the pair the reported metrics came from.
 
-### Two windows, because the model has two scales
+### One window, because the model had one in training
 
-The **detail window** (orange on the map) is what gets segmented at 20 m. The
-**context window** (dashed) is what the tile context encoder sees, compressed to
-256 px and injected into the network through FiLM. In training that context was
-a whole fire tile, 35–154 km across, which is why the default is far larger than
-the detail window and why shrinking it changes the result.
+The orange box is both things at once: the extent segmented at 20 m in
+overlapping 256 px patches, **and** the extent the tile context encoder sees,
+compressed to 256 px and injected through FiLM. That is not a simplification —
+it is what training did. A patch grid tiled a whole fire tile and the context
+thumbnail was that same tile, so the segmented area and the context area were
+always identical.
 
-The detail window reaches **81.92 km (4096 px)**, which is what the fires this
-model is for actually need — the 2025 test-split scars run 55–75 km across. A
-single `computePixels` response is capped at 32 MiB, about 1024 px square with
+An earlier version of this page exposed them as two sliders. Don't: a context
+wider than the window is not "more context", it is a different distribution, and
+the setting silently swings the answer. Measured on one 71.68 km run over
+`CA_2025_SK_433`:
+
+| context | burned | outer 30–36 km ring | mask IoU vs context = window |
+|---|---|---|---|
+| = window (71.68 km) | 234,774 ha | 36.1% burned | — |
+| 100 km | 257,344 ha | 38.9% burned | 0.892 |
+| 45 km (narrower than the window) | 144,011 ha | 8.9% burned | 0.589 |
+
+The 45 km row is the instructive failure: patches near the window's edge fall
+outside the context, so `sampleContext` clamps them to the context map's border
+and the periphery collapses. That is what a truncated-looking result means.
+
+**Small windows, not large ones, are the off-distribution case.**
+`patch_size / window_size` is the scale the context gets sampled at; training
+tiles were 1771–2698 px with 128–512 px sampling windows, which puts it between
+0.047 and 0.289. So:
+
+| window | context scale | |
+|---|---|---|
+| 81.92 km (4096 px) | 0.063 | in range |
+| 56.32 km (2816 px) | 0.091 | in range, and near the training centre |
+| 17.92 km (896 px) | 0.286 | at the edge of the range |
+| 5.12 km (256 px) | 1.000 | far outside — don't |
+
+That is why the slider starts at 17.92 km, and why the readout under it names the
+context scale and says when the window has left the trained range.
+
+A single `computePixels` response is capped at 32 MiB, about 1024 px square with
 eight `int16` bands, so a wider window is fetched as a grid of requests and
-reassembled. That reassembly is byte-identical to the single request it
-replaces, checked directly against the API.
+reassembled. That reassembly is byte-identical to the single request it replaces,
+checked directly against the API.
 
 Two things scale badly with the window, and both are handled rather than hoped
 about:
@@ -90,17 +119,29 @@ about:
   wide window can have forty of them in flight; at a fixed fine scale Earth
   Engine answers *"Too many concurrent aggregations"* and the run dies before any
   imagery is fetched. The ranking scale therefore grows with the window, keeping
-  each reduction near 150×150 cells. This costs nothing real — over a 72 km
-  window the mean `cs_cdf` moves by 0.002 between 480 m and 1920 m, and these
-  numbers only rank scenes.
+  each reduction near 150×150 cells. It costs nothing real — over a 72 km window
+  the mean `cs_cdf` moves by 0.002 between 480 m and 1920 m, and these numbers
+  only rank scenes.
 - **Memory.** At 4096 px the eight `float32` planes are 537 MB, so the
   reflectance is standardised *in place* and the false-colour panels are
-  rasterised to their canvases before that happens. The slider shows the request
-  count, window count and memory for the size chosen, and warns past 2048 px.
+  rasterised to their canvases before that happens.
 
 For reference, the largest preset (71.68 km, 3584 px) is 16 Earth Engine
 requests totalling ~140 MB, 729 model windows and ~525 MB resident. That is tens
 of seconds on WebGPU and minutes on WebAssembly.
+
+### A caution about the numbers at this extent
+
+On `CA_2025_SK_433` with the window matching the fire, this page reports
+**234,774 ha against an NBAC reference of 170,576 ha** — a 38% over-prediction.
+The predictions do reach the window edges, so the window is not the limit. Three
+things plausibly contribute and none has been separated yet: the page's ±20-day
+clarity-first search picked a pre-fire scene (2024-08-26) that is not the one the
+archive used (2024-09-15); that scene carries cloud over part of a window this
+wide; and a 72 km box around one fire contains neighbouring fires that are not in
+that tile's mask — on the K70748 validation fire, attributing neighbours moved
+precision from 0.829 to 0.961. Treat the hectare figure as a demonstration, not
+as a measurement.
 
 ### The one approximation
 
