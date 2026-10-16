@@ -5,12 +5,17 @@
 @media(max-width:560px){.site-header nav a:not(.back-link){display:none}.field-pair,.results .canvas-grid{grid-template-columns:1fr}.map-wrap,.map-wrap #map{min-height:420px}.map-caption span{display:none}.selection-summary{grid-template-columns:1fr}.selection-summary article{border-right:0;border-bottom:1px solid var(--line)!important}.selection-summary article:last-child{border-bottom:0!important}}
 
 /* FlameNet-S2 deployment: five summary cards instead of four, the model
-   identity line under the title, and the framework credit in the method note. */
+   identity line under the title, and a header carrying only the wordmark.
+
+   The @import above pulls in the page design this tool is built on. If the
+   rest of this repository is ever pruned, that file has to come along or the
+   page loads unstyled. */
 .selection-summary{grid-template-columns:repeat(5,1fr)}
 .tool-intro .model-line{margin:18px 0 0;max-width:680px;color:var(--muted);font-size:11px;font-weight:400;letter-spacing:.02em;text-transform:none;line-height:1.7}
-.method-credit{margin-top:26px;padding-top:18px;border-top:1px solid var(--line);color:var(--muted);font-size:12px}
-.method-credit a{color:var(--ink);font-weight:700}
 .band-key span:last-child b{color:var(--orange)}
 @media(max-width:1180px){.selection-summary{grid-template-columns:repeat(3,1fr)}.selection-summary article:nth-child(3){border-right:0}.selection-summary article:nth-child(-n+3){border-bottom:1px solid var(--line)}}
 @media(max-width:900px){.selection-summary{grid-template-columns:1fr 1fr}.selection-summary article:nth-child(2n){border-right:0}.selection-summary article:nth-child(-n+4){border-bottom:1px solid var(--line)}}
 @media(max-width:560px){.selection-summary{grid-template-columns:1fr}}
+.site-header .wordmark{font-family:Manrope,sans-serif;font-size:15px;font-weight:800;letter-spacing:-.02em}
+footer{flex-wrap:wrap;gap:6px 24px}
+@media(max-width:560px){footer{flex-direction:column}}

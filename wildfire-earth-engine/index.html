@@ -5,16 +5,14 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="theme-color" content="#07110f">
   <meta name="description" content="Run FlameNet-S2, a Sentinel-2 burned-area model, on live Earth Engine imagery in the browser.">
-  <title>FlameNet-S2 · Earth Engine Wildfire Lab</title>
-  <link rel="icon" href="../img/favicon.png" type="image/png">
+  <title>FlameNet-S2 · Sentinel-2 burned-area mapping</title>
   <link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin>
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.css">
   <link rel="stylesheet" href="./style.css">
 </head>
 <body>
   <header class="site-header">
-    <a class="wordmark" href="../"><span aria-hidden="true">AS</span> Ali Shibli</a>
-    <nav><a href="../#projects">Projects</a><a href="../wildfire-demo/">Upload GeoTIFFs</a><a class="back-link" href="../">Portfolio ↗</a></nav>
+    <span class="wordmark">FlameNet-S2</span>
   </header>
 
   <main>
@@ -31,7 +29,7 @@
         <div class="engine-status" id="ee-status"><span></span><b>Not connected</b></div>
       </div>
       <div class="connection-grid">
-        <label><span>Google Cloud project</span><input id="project-id" value="lebanese-sport-pitches" autocomplete="off"></label>
+        <label><span>Google Cloud project</span><input id="project-id" value="wildfire-collection" autocomplete="off"></label>
         <label><span>OAuth client ID</span><input id="client-id" type="text" placeholder="…apps.googleusercontent.com" autocomplete="off"></label>
         <button id="connect-button" class="run-button" type="button"><span>Connect Google account</span><i aria-hidden="true">→</i></button>
       </div>
@@ -81,7 +79,7 @@
           <label><span>Detail window <output id="detail-value">20.48 km</output></span><input id="detail-size" type="range" min="5.12" max="20.48" value="20.48" step="1.28"></label>
           <label><span>Context window <output id="context-value">54 km</output></span><input id="context-size" type="range" min="20" max="80" value="54" step="2"></label>
           <div class="field-pair">
-            <label><span>Pre-fire date — prior year's fire season</span><input id="pre-date" type="date" value="2025-08-22"></label>
+            <label><span>Pre-fire date</span><input id="pre-date" type="date" value="2025-08-22"></label>
             <label><span>Target observation</span><input id="target-date" type="date" value="2026-09-16"></label>
           </div>
           <div class="field-pair compact-fields">
@@ -133,20 +131,9 @@
       </div>
     </section>
 
-    <section class="method">
-      <div><p>04 / Method and limits</p><h2>A research demonstrator, not an emergency product.</h2></div>
-      <div class="method-copy">
-        <p><strong>The pipeline is the dataset's, not an approximation of it.</strong> Sentinel-2 <code>COPERNICUS/S2_SR_HARMONIZED</code> surface reflectance, bands B12/B8/B4 with Cloud Score+ <code>cs_cdf</code> linked per scene, granules of one overpass mosaicked by datatake, DN clamped to 0–5000, and a 20 m grid in the scene's local UTM zone. Every preprocessing constant is read at page load from <code>model/model_meta.json</code>, which the export script writes from the training code, so the browser cannot drift away from the research path. <code>scripts/verify_browser_pipeline.py</code> checks this implementation against the reference one on a real tile.</p>
-        <p><strong>The pre-fire scene comes from the previous year's fire season</strong>, not from the weeks before ignition. That is how the model was trained — the dataset searches the fire's own date window shifted back one year — and it is what controls for phenology while avoiding the smoke-filled active-fire period. Set the pre-fire date inside that prior-year season; a date one year before the <em>target observation</em> is not the same thing, and for a fire observed long after it stopped burning it can miss the season by months. Each preset carries the date the dataset loader itself selected for that fire. Both scenes are then chosen by clarity — highest mean <code>cs_cdf</code> minus the no-data fraction — which is the loader's own rule.</p>
-        <p><strong><code>cs_cdf</code> is a model input, not a mask.</strong> The network is given the clear score as a fourth channel per phase, so it knows which pixels it cannot trust rather than having to infer that from brightness. Pixels either phase could not see through, below <code>cs_cdf 0.65</code>, are then reported as obscured and excluded from the area — this product does not score an unobserved pixel as unburned. Imagery is displayed with cloud left in, because masking it to grey fills a panel with holes that read as lakes rather than as weather.</p>
-        <p><strong>Two windows, because the model has two scales.</strong> The orange box is segmented at 20 m in overlapping 256 px patches, Gaussian-blended, with components under 50 px dropped. The dashed box is what the tile context encoder sees, compressed to 256 px; it was 35–154 km in training, which is why it is set much larger than the detail window and why shrinking it moves the result.</p>
-        <p><strong>What it does not do.</strong> It segments burning already visible in the target image; it does not predict ignition or future spread. It was trained on Canada 2017–2023, validated on 2024 and tested on 2025. Cloud, smoke, snow, misregistration, unfamiliar ecosystems and imagery outside those years can all cause errors — the Kalimantan preset is deliberately out of domain, and while that result is corroborated by dNBR there is no burned-area reference for it.</p>
-        <p class="method-credit">Model: FlameNet-S2. Earth Engine application framework by <a href="../">Ali Shibli</a>.</p>
-      </div>
-    </section>
   </main>
 
-  <footer><span>Research prototype · 2026</span><a href="mailto:shibli@kth.se">shibli@kth.se</a></footer>
+  <footer><span>FlameNet-S2 · research prototype, not an operational product</span><span>Trained Canada 2017–2023 · validated 2024 · tested 2025</span></footer>
 
   <script src="https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.js"></script>
   <script src="https://ajax.googleapis.com/ajax/libs/earthengine/1.7.47/earthengine-api.min.js"></script>
