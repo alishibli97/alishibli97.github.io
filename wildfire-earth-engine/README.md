@@ -151,6 +151,59 @@ with the channel mean before averaging. 98% of selected scenes have no masked
 pixels at all, and the thumbnail only feeds the FiLM modulation. Everything else
 is checked, below.
 
+## Handing this to someone else
+
+Everything needed to **run** the page is in this repository. There is no server
+and no build step: it is static files, and the model is 2.4 MB of ONNX sitting
+next to them.
+
+What the recipient must bring, because the page deliberately holds no
+credentials of its own:
+
+- **Their own Earth Engine project** — a Google Cloud project with the Earth
+  Engine API enabled and registered for Earth Engine. The project field is
+  blank on purpose; a pre-filled project ID that is not theirs just produces a
+  permission error they cannot read.
+- **Their own OAuth Web client**, created in that project, with the origin they
+  serve this from in its Authorized JavaScript origins. A client ID is bound to
+  an origin, so it cannot be shipped with the code.
+- If their consent screen is in **Testing** — it will be — the account they sign
+  in with has to be listed under *Audience → Test users*, or Google answers
+  "has not completed the Google verification process". The page's setup panel
+  spells this out.
+
+Earth Engine bills the pixel computation to whichever project they name. The
+inference is on their own machine, so it costs nothing and sends nothing.
+
+### What is NOT in here
+
+- **The checkpoint and the training code.** `model/` holds the *exported* graphs,
+  which is all the page needs. Re-exporting them needs the FlameNet-S2
+  repository, `runs/mode_early_cloud/best.pth`, and `scripts/export_onnx.py` —
+  see *Rebuilding `model/`* below. Hand those over only if the recipient is
+  meant to retrain or re-export.
+- **The end-to-end test fixture**, ~7 MB generated from the K70748 GeoTIFFs. So
+  `npm test` is **17 of 18** in a fresh clone, with `endtoend.test.mjs` skipping
+  itself. The other 17 are self-contained and should pass immediately.
+
+### Network dependencies
+
+The page is static but not offline. It loads from four external hosts:
+
+| host | what |
+|---|---|
+| `cdn.jsdelivr.net` | Leaflet, geotiff.js, onnxruntime-web and its WASM binaries |
+| `ajax.googleapis.com` | the Earth Engine JavaScript client |
+| `earthengine.googleapis.com` | the imagery itself |
+| `{a,b,c}.tile.openstreetmap.org` | basemap tiles |
+
+Two consequences worth stating before you hand it over. **`ajax.googleapis.com`
+and Earth Engine are not reachable from mainland China without a VPN**, so a
+recipient there cannot use this page as-is. And the library versions are pinned
+but not vendored, so the page depends on jsDelivr staying up. Vendoring all four
+into `vendor/` would remove both problems at the cost of a few MB in the
+repository; it has not been done.
+
 ## Tests
 
 ```sh

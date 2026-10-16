@@ -29,16 +29,20 @@
         <div class="engine-status" id="ee-status"><span></span><b>Not connected</b></div>
       </div>
       <div class="connection-grid">
-        <label><span>Google Cloud project</span><input id="project-id" value="wildfire-collection" autocomplete="off"></label>
+        <label><span>Google Cloud project</span><input id="project-id" placeholder="your-earth-engine-project" autocomplete="off"></label>
         <label><span>OAuth client ID</span><input id="client-id" type="text" placeholder="…apps.googleusercontent.com" autocomplete="off"></label>
         <button id="connect-button" class="run-button" type="button"><span>Connect Google account</span><i aria-hidden="true">→</i></button>
       </div>
       <details class="setup-help">
-        <summary>One-time OAuth setup instructions</summary>
+        <summary>One-time setup — you need your own Earth Engine access</summary>
+        <p>This page has no server and no credentials of its own: it runs on <b>your</b> Google account and <b>your</b> Earth Engine project. Both fields above are yours to fill, once; the browser remembers them afterwards.</p>
         <ol>
-          <li>In Google Cloud Console, use the Earth Engine-enabled project and create an OAuth 2.0 <b>Web application</b> client.</li>
-          <li>Add this site's origin as an authorized JavaScript origin.</li>
-          <li>Paste the resulting client ID above. A client ID is public configuration; never paste a client secret or service-account key.</li>
+          <li>Have a Google Cloud project with the <b>Earth Engine API enabled</b> and registered for Earth Engine. Put its project ID in the first field.</li>
+          <li>In that project, under <b>APIs &amp; Services → Credentials</b>, create an OAuth 2.0 client of type <b>Web application</b>.</li>
+          <li>Add this site's origin — scheme and host only, no path, no trailing slash — to its <b>Authorized JavaScript origins</b>. Without this, Google refuses the sign-in.</li>
+          <li>Paste the client ID, the value ending <code>.apps.googleusercontent.com</code>, into the second field. A client ID is public configuration. <b>Never paste the client secret</b> (it starts <code>GOCSPX-</code>) or a service-account key — this page does not use either.</li>
+          <li>If Google answers <i>"has not completed the Google verification process"</i>, your consent screen is in <b>Testing</b>: add the account you sign in with under <b>Audience → Test users</b>. Keep it in Testing — publishing a sensitive scope triggers a manual review that takes weeks and buys nothing here.</li>
+          <li>The one permission requested is <code>earthengine.readonly</code>. Earth Engine charges the pixel computation to the project you named; the model itself runs on this machine.</li>
         </ol>
         <a href="https://developers.google.com/earth-engine/custom-apps/client-js" target="_blank" rel="noreferrer">Official Earth Engine setup guide ↗</a>
       </details>
