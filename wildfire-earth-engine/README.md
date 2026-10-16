@@ -1,0 +1,165 @@
+# FlameNet-S2 on Earth Engine
+
+A browser deployment of **FlameNet-S2**, a Sentinel-2 burned-area segmentation
+model. Earth Engine supplies a pre/post Sentinel-2 pair, `onnxruntime-web` runs
+the trained network on it, and the map is produced without any imagery or
+result leaving the machine.
+
+The application framework — the page, the Earth Engine OAuth flow, the map and
+the canvas layout — is Ali Shibli's. This directory swaps in FlameNet-S2 and the
+preprocessing that model requires.
+
+```
+index.html      the page
+app.js          Earth Engine queries, the inference loop, rendering
+pipeline.js     the numeric core, with no DOM or network: testable in node
+style.css       the framework's stylesheet plus this page's overrides
+model/          the exported graphs and the preprocessing constants
+test/           node tests against the research implementation
+```
+
+## What the model requires, and what this reproduces
+
+FlameNet-S2 is only valid on its own preprocessing, so none of this is
+approximated. The upstream framework assumed a different model, and these are
+the things that had to change with it:
+
+| | FlameNet-S2 |
+|---|---|
+| Collection | `COPERNICUS/S2_SR_HARMONIZED` — L2A surface reflectance, not L1C TOA |
+| Bands | `B12, B8, B4, cs_cdf` per phase, in that order |
+| `cs_cdf` | a model **input channel**, continuous, not a binary cloud mask |
+| Reflectance | DN clamped to 0–5000, scaled by 1e-4, clipped to 0.5, then standardised with the 2017–2023 training means and stds |
+| Grid | 20 m in the scene's local **UTM** zone — a 20 m Web Mercator pixel is 11 m on the ground at 56° N, which would show the model imagery at 1.8× its training resolution |
+| Pre-fire scene | the **previous year's fire season**, which controls for phenology and avoids the smoke-filled active-fire period — not a lookback before ignition, and not the target date minus a year (see below) |
+| Scene choice | highest mean `cs_cdf` minus the no-data fraction, the dataset loader's own rule |
+| Granules | one overpass is one scene, mosaicked by `DATATAKE_IDENTIFIER` |
+| Inference | 256 px patches, stride 128, Gaussian-blended, with the tile context encoder's output sampled at each patch's footprint, then components under 50 px dropped |
+| Cloud | pixels either phase could not see through (`cs_cdf < 0.65`) are reported as obscured and excluded, never scored as unburned |
+
+Every one of those constants is read at page load from
+`model/model_meta.json`, which the export script writes directly from the
+training code. Nothing about the model is duplicated here as a literal, so the
+page cannot drift away from the research pipeline without the export noticing.
+
+### The pre-fire date
+
+The archive builds its pre-fire candidate pool from the fire's own date window
+shifted back exactly one year (`gee/s1s2.py:356`):
+
+```python
+s2_dict["pre"] = MSI.filterDate(period_start.advance(-1, "year"),
+                                period_end.advance(-1, "year"))
+```
+
+The page takes that date from you rather than deriving it, because the fire
+window is not something the page knows. **Target date minus one year is not a
+substitute**: the post scene is whatever was clearest in the three months after
+the fire stopped, so the gap between the two is routinely 14 months and can be
+21. Three real examples from the dataset:
+
+| tile | pre | post | gap |
+|---|---|---|---|
+| `CA_2025_ON_594` | 2024-06-10 | 2025-08-31 | 14.7 months |
+| `CA_2025_SK_433` | 2024-09-15 | 2025-11-04 | 13.7 months |
+| `CA_2025_BC_524` | 2024-08-03 | 2026-05-20 | 21 months |
+
+Every preset carries the pre date the dataset loader itself selected for that
+fire, so the presets run on exactly the pair the reported metrics came from.
+
+### Two windows, because the model has two scales
+
+The **detail window** (orange on the map) is what gets segmented at 20 m. The
+**context window** (dashed) is what the tile context encoder sees, compressed to
+256 px and injected into the network through FiLM. In training that context was
+a whole fire tile, 35–154 km across, which is why the default is far larger than
+the detail window and why shrinking it changes the result.
+
+The detail window is capped at 1024 px because Earth Engine refuses a
+`computePixels` response over 32 MiB. Eight bands of `int16` at 1024² is ~17 MB;
+the reflectance DN are integers in the archive anyway, and quantising `cs_cdf`
+to 1e-4 moves that standardised channel by 1.5e-3.
+
+### The one approximation
+
+Earth Engine averages the 20 m pixels into the 256 px context grid with
+`reduceResolution`, which ignores masked pixels, whereas the loader fills them
+with the channel mean before averaging. 98% of selected scenes have no masked
+pixels at all, and the thumbnail only feeds the FiLM modulation. Everything else
+is checked, below.
+
+## Tests
+
+```sh
+npm install          # onnxruntime-web, for the end-to-end test only
+npm test
+```
+
+- **`test/pipeline.test.mjs`** checks each hand-transcribed function in
+  `pipeline.js` against the real numpy / cv2 / torch implementation. The
+  expected answers in `test/vectors.json` are generated by
+  `scripts/make_pipeline_vectors.py` in the FlameNet-S2 repository, from
+  `_read_tif`, `_normalise`, `_extract_patch_ctx`, `gaussian_weight`,
+  `remove_small_cc` and `predict_fire.py`'s sliding window.
+- **`test/wiring.test.mjs`** checks that `app.js` and `index.html` still agree
+  about every element id, and that no control of the upstream page survives in
+  half-edited form.
+- **`test/endtoend.test.mjs`** runs the deployment's own window loop over the
+  real ONNX graphs under `onnxruntime-web` and compares the burned area to what
+  `scripts/predict_fire.py` reports for the same tile. It needs a fixture of a
+  few megabytes, which is not committed, so it **skips itself** unless you
+  generate one:
+
+  ```sh
+  # in the FlameNet-S2 repository
+  python scripts/verify_browser_pipeline.py \
+      --pre  data/K70748_2026/pre/CA_2026_BC_K70748_HS_20250822_0.tif \
+      --post data/K70748_2026/post/CA_2026_BC_K70748_HS_20260916_0.tif \
+      --crop 384 --emit-js-fixture <this dir>/test/fixture
+  ```
+
+  On the K70748 validation fire it reports 3,928.9 ha against the research
+  pipeline's 3,928.3 ha — 15 pixels of 98,208, all of them sitting within 1e-4
+  of the probability cutoff, where WebAssembly and torch do not round alike.
+
+## Rebuilding `model/`
+
+From the FlameNet-S2 repository:
+
+```sh
+python scripts/export_onnx.py \
+    --ckpt runs/mode_early_cloud/best.pth --in-ch 4 --out deploy/model \
+    --verify-pre  data/K70748_2026/pre/CA_2026_BC_K70748_HS_20250822_0.tif \
+    --verify-post data/K70748_2026/post/CA_2026_BC_K70748_HS_20260916_0.tif
+cp deploy/model/* <this dir>/model/
+```
+
+The export refuses to write graphs that do not reproduce the checkpoint, and
+rewrites `model_meta.json` from the training code, so the page picks up any
+change to the preprocessing automatically. After re-exporting, regenerate
+`test/vectors.json` and re-run `npm test`.
+
+The model is two graphs rather than one because the tile context is computed
+once per scene and reused by every patch:
+
+```
+flamenet_s2_ctx.onnx     ctx_in (1, 8, 256, 256)  -> tile_ctx    (1, 32, 64, 64)
+                                                     coarse_fire (1,  1, 64, 64)
+flamenet_s2_patch.onnx   pre     (1, 4, 256, 256)
+                         post    (1, 4, 256, 256)
+                         ctx_btn (1, 32, 16, 16)  -> probability (1,  1, 256, 256)
+```
+
+The context sampling between them stays in JavaScript, so neither graph needs
+`GridSample` — the one operator whose `onnxruntime-web` coverage cannot be
+relied on. What the graphs do use is ordinary: `Conv`, `Clip`, `Sigmoid`,
+`PRelu`, `InstanceNormalization`, `Resize`, `AveragePool`, `GlobalAveragePool`.
+
+## Limits
+
+This is a research demonstrator, not an emergency product. It segments burning
+already visible in the target image; it does not predict ignition or spread. It
+was trained on Canada 2017–2023, validated on 2024 and tested on 2025. Cloud,
+smoke, snow, misregistration, unfamiliar ecosystems and imagery outside those
+years can all cause errors. The Kalimantan preset is deliberately out of domain:
+that result is corroborated by dNBR, but no burned-area reference exists for it.

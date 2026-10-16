@@ -1,0 +1,8 @@
+# Installed only for test/endtoend.test.mjs; the page itself loads
+# onnxruntime-web from a CDN.
+node_modules/
+package-lock.json
+
+# Generated on demand by scripts/verify_browser_pipeline.py --emit-js-fixture.
+# Several megabytes of raw float32; endtoend.test.mjs skips itself without it.
+test/fixture/

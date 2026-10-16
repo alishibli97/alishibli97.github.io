@@ -1,0 +1,64 @@
+{
+  "name": "FlameNet-S2",
+  "checkpoint": "runs/mode_early_cloud/best.pth",
+  "opset": 17,
+  "params": 591723,
+  "in_ch_per_phase": 4,
+  "bands": [
+    "B12",
+    "B8",
+    "B4",
+    "cs_cdf"
+  ],
+  "collection": "COPERNICUS/S2_SR_HARMONIZED",
+  "cloud_collection": "GOOGLE/CLOUD_SCORE_PLUS/V1/S2_HARMONIZED",
+  "qa_band": "cs_cdf",
+  "scale_m": 20,
+  "dn_clamp": 5000,
+  "dn_scale": 0.0001,
+  "refl_clip": 0.5,
+  "mean": [
+    0.0681,
+    0.1627,
+    0.0608,
+    0.9039
+  ],
+  "std": [
+    0.044,
+    0.073,
+    0.0426,
+    0.0676
+  ],
+  "cs_clear": 0.9,
+  "cloud_valid_cs": 0.65,
+  "patch_size": 256,
+  "stride": 128,
+  "ctx_size": 256,
+  "ctx_ch": 32,
+  "btn_size": 16,
+  "min_cc_area": 50,
+  "threshold": 0.5,
+  "train_years": [
+    2017,
+    2018,
+    2019,
+    2020,
+    2021,
+    2022,
+    2023
+  ],
+  "val_years": [
+    2024
+  ],
+  "test_years": [
+    2025
+  ],
+  "tile_extent_km": [
+    35,
+    54
+  ],
+  "graphs": {
+    "ctx": "flamenet_s2_ctx.onnx",
+    "patch": "flamenet_s2_patch.onnx"
+  }
+}
