@@ -21,3 +21,8 @@ footer{flex-wrap:wrap;gap:6px 24px}
 @media(max-width:560px){footer{flex-direction:column}}
 .window-cost{margin:-4px 0 0;padding:0 2px;color:var(--muted);font-size:10px;letter-spacing:.03em;line-height:1.5}
 .window-cost.is-heavy{color:var(--orange)}
+/* The inherited .canvas-shell is aspect-ratio 1.35, for the landscape GeoTIFFs
+   the upload page takes. This page always segments a square window on a square
+   UTM grid, so a landscape shell just letterboxes a square canvas between two
+   dark bars. */
+.canvas-shell{aspect-ratio:1}
