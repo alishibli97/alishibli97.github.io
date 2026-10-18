@@ -4,17 +4,40 @@
 @media(max-width:900px){.connection-grid{grid-template-columns:1fr}.connection-grid .run-button{min-height:62px}.example-picker{grid-template-columns:1fr}.explorer-grid{grid-template-columns:1fr}.controls-panel{min-height:440px}.explorer-grid:fullscreen,.explorer-grid.is-map-expanded{display:block;padding:12px}.explorer-grid:fullscreen .map-wrap,.explorer-grid:fullscreen .map-wrap #map,.explorer-grid.is-map-expanded .map-wrap,.explorer-grid.is-map-expanded .map-wrap #map{min-height:58vh}.explorer-grid:fullscreen .controls-panel,.explorer-grid.is-map-expanded .controls-panel{min-height:0;margin-top:12px}.selection-summary{grid-template-columns:1fr 1fr}.selection-summary article:nth-child(2){border-right:0}.selection-summary article:nth-child(-n+2){border-bottom:1px solid var(--line)}}
 @media(max-width:560px){.site-header nav a:not(.back-link){display:none}.field-pair,.results .canvas-grid{grid-template-columns:1fr}.map-wrap,.map-wrap #map{min-height:420px}.map-caption span{display:none}.selection-summary{grid-template-columns:1fr}.selection-summary article{border-right:0;border-bottom:1px solid var(--line)!important}.selection-summary article:last-child{border-bottom:0!important}}
 
-/* Model switcher shared visually with the Canadian FlameNet-S2 route. */
+/* FlameNet-S2 deployment: five summary cards instead of four, the model
+   identity line under the title, and a header carrying only the wordmark.
+
+   The @import above pulls in the page design this tool is built on. If the
+   rest of this repository is ever pruned, that file has to come along or the
+   page loads unstyled. */
+.selection-summary{grid-template-columns:repeat(5,1fr)}
+.tool-intro .model-line{margin:18px 0 0;max-width:680px;color:var(--muted);font-size:11px;font-weight:400;letter-spacing:.02em;text-transform:none;line-height:1.7}
+.band-key span:last-child b{color:var(--orange)}
+@media(max-width:1180px){.selection-summary{grid-template-columns:repeat(3,1fr)}.selection-summary article:nth-child(3){border-right:0}.selection-summary article:nth-child(-n+3){border-bottom:1px solid var(--line)}}
+@media(max-width:900px){.selection-summary{grid-template-columns:1fr 1fr}.selection-summary article:nth-child(2n){border-right:0}.selection-summary article:nth-child(-n+4){border-bottom:1px solid var(--line)}}
+@media(max-width:560px){.selection-summary{grid-template-columns:1fr}}
+.site-header .wordmark{font-family:Manrope,sans-serif;font-size:15px;font-weight:800;letter-spacing:-.02em}
+footer{flex-wrap:wrap;gap:6px 24px}
+@media(max-width:560px){footer{flex-direction:column}}
+.window-cost{margin:-4px 0 0;padding:0 2px;color:var(--muted);font-size:10px;letter-spacing:.03em;line-height:1.5}
+.window-cost.is-heavy{color:var(--orange)}
+/* The inherited .canvas-shell is aspect-ratio 1.35, for the landscape GeoTIFFs
+   the upload page takes. This page always segments a square window on a square
+   UTM grid, so a landscape shell just letterboxes a square canvas between two
+   dark bars. */
+.canvas-shell{aspect-ratio:1}
+
+/* Keep the Canadian and US deployments isolated while making the active model
+   explicit. Each route retains the preprocessing required by its checkpoint. */
 .site-header{gap:18px}
 .site-header .wordmark{font-family:Manrope,sans-serif;font-size:14px;font-weight:800;letter-spacing:-.02em;white-space:nowrap}
 .site-header .wordmark b{font:inherit}
-.model-selector{display:flex!important;align-items:stretch!important;gap:0!important;padding:3px;border:1px solid var(--line);border-radius:999px;background:rgba(255,255,255,.38)}
-.model-selector a{display:flex!important;flex-direction:column;justify-content:center;min-width:150px;padding:7px 16px!important;border:0!important;border-radius:999px;color:var(--muted)!important;text-decoration:none;font-size:inherit!important;font-weight:inherit!important;line-height:1.1}
+.model-selector{display:flex;align-items:stretch;padding:3px;border:1px solid var(--line);border-radius:999px;background:rgba(255,255,255,.38)}
+.model-selector a{display:flex;flex-direction:column;justify-content:center;min-width:150px;padding:7px 16px;border-radius:999px;color:var(--muted);text-decoration:none;line-height:1.1}
 .model-selector a span{font-size:8px;font-weight:700;letter-spacing:.1em;text-transform:uppercase}
 .model-selector a b{margin-top:3px;color:inherit;font-size:11px}
-.model-selector a[aria-current="page"]{background:var(--night);color:#fff!important}
+.model-selector a[aria-current="page"]{background:var(--night);color:#fff}
 .model-selector a[aria-current="page"] span{color:var(--green)}
 .portfolio-link{color:inherit;text-decoration:none;font-size:12px;font-weight:700;border-bottom:1px solid currentColor;padding-bottom:3px;white-space:nowrap}
-@media(max-width:760px){.site-header{height:auto;min-height:76px;flex-wrap:wrap;padding:10px 0}.site-header .wordmark b,.portfolio-link{display:none}.model-selector{margin-left:auto}.site-header .model-selector a{min-width:122px;padding:7px 11px!important}}
-@media(max-width:560px){.site-header .model-selector a{display:flex!important}}
-@media(max-width:420px){.site-header .model-selector a{min-width:108px}.model-selector a span{display:none}}
+@media(max-width:760px){.site-header{height:auto;min-height:76px;flex-wrap:wrap;padding:10px 0}.site-header .wordmark b,.portfolio-link{display:none}.model-selector{margin-left:auto}.model-selector a{min-width:122px;padding:7px 11px}}
+@media(max-width:420px){.model-selector a{min-width:108px}.model-selector a span{display:none}}

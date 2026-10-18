@@ -20,7 +20,7 @@ import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 
 const root = path.join(path.dirname(fileURLToPath(import.meta.url)), "..");
-const read = name => readFileSync(path.join(root, name), "utf8");
+const read = name => readFileSync(path.join(root, "ca", name), "utf8");
 const appSource = read("app.js");
 const htmlSource = read("index.html");
 

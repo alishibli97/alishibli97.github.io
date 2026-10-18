@@ -28,7 +28,7 @@ import { fileURLToPath } from "node:url";
 import {
   blendWindow, extractPatch, gaussianWeight, normaliseBlend,
   removeSmallComponents, sampleContext, standardise, windowStarts,
-} from "../pipeline.js";
+} from "../ca/pipeline.js";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const fixtureDir = path.join(here, "fixture");
@@ -42,7 +42,7 @@ test("the window loop reproduces predict_fire.py's burned area",
     ort.env.wasm.numThreads = 1;
     ort.env.wasm.wasmPaths = path.join(here, "..", "node_modules", "onnxruntime-web", "dist") + path.sep;
 
-    const meta = JSON.parse(readFileSync(path.join(here, "..", "model", "model_meta.json")));
+    const meta = JSON.parse(readFileSync(path.join(here, "..", "ca", "model", "model_meta.json")));
     const fixture = JSON.parse(readFileSync(path.join(fixtureDir, "fixture.json")));
     const { width, height, channels, ctx_size: ctxSize } = fixture;
 
@@ -70,9 +70,9 @@ test("the window loop reproduces predict_fire.py's burned area",
     const patch = meta.patch_size;
     const session = provider => ({ executionProviders: [provider] });
     const ctxSession = await ort.InferenceSession.create(
-      path.join(here, "..", "model", meta.graphs.ctx), session("wasm"));
+      path.join(here, "..", "ca", "model", meta.graphs.ctx), session("wasm"));
     const patchSession = await ort.InferenceSession.create(
-      path.join(here, "..", "model", meta.graphs.patch), session("wasm"));
+      path.join(here, "..", "ca", "model", meta.graphs.patch), session("wasm"));
 
     // ── exactly what app.js's runInference does ──────────────────────────────
     const norm = planes => standardise(planes, meta.mean, meta.std);

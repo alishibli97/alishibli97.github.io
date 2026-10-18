@@ -18,7 +18,7 @@ import {
   extractPatch, gaussianWeight, jointRamp, normaliseBlend,
   removeSmallComponents, sampleContext, standardise, standardiseInto,
   windowStarts,
-} from "../pipeline.js";
+} from "../ca/pipeline.js";
 
 const { cases } = JSON.parse(readFileSync(new URL("./vectors.json", import.meta.url)));
 
