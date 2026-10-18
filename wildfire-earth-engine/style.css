@@ -26,3 +26,18 @@ footer{flex-wrap:wrap;gap:6px 24px}
    UTM grid, so a landscape shell just letterboxes a square canvas between two
    dark bars. */
 .canvas-shell{aspect-ratio:1}
+
+/* Keep the Canadian and US deployments isolated while making the active model
+   explicit. Each route retains the preprocessing required by its checkpoint. */
+.site-header{gap:18px}
+.site-header .wordmark{font-family:Manrope,sans-serif;font-size:14px;font-weight:800;letter-spacing:-.02em;white-space:nowrap}
+.site-header .wordmark b{font:inherit}
+.model-selector{display:flex;align-items:stretch;padding:3px;border:1px solid var(--line);border-radius:999px;background:rgba(255,255,255,.38)}
+.model-selector a{display:flex;flex-direction:column;justify-content:center;min-width:150px;padding:7px 16px;border-radius:999px;color:var(--muted);text-decoration:none;line-height:1.1}
+.model-selector a span{font-size:8px;font-weight:700;letter-spacing:.1em;text-transform:uppercase}
+.model-selector a b{margin-top:3px;color:inherit;font-size:11px}
+.model-selector a[aria-current="page"]{background:var(--night);color:#fff}
+.model-selector a[aria-current="page"] span{color:var(--green)}
+.portfolio-link{color:inherit;text-decoration:none;font-size:12px;font-weight:700;border-bottom:1px solid currentColor;padding-bottom:3px;white-space:nowrap}
+@media(max-width:760px){.site-header{height:auto;min-height:76px;flex-wrap:wrap;padding:10px 0}.site-header .wordmark b,.portfolio-link{display:none}.model-selector{margin-left:auto}.model-selector a{min-width:122px;padding:7px 11px}}
+@media(max-width:420px){.model-selector a{min-width:108px}.model-selector a span{display:none}}

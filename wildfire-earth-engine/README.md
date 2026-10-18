@@ -5,6 +5,12 @@ model. Earth Engine supplies a pre/post Sentinel-2 pair, `onnxruntime-web` runs
 the trained network on it, and the map is produced without any imagery or
 result leaving the machine.
 
+This portfolio deployment also preserves Ali Shibli's original US progression
+model under `us/`. The header selector switches between the two independent
+routes. They intentionally do not share inference code because each checkpoint
+requires different imagery selection and preprocessing; they share only the
+saved Earth Engine project and public OAuth client ID in browser storage.
+
 The page design, the Earth Engine OAuth flow, the map and the canvas layout come
 from Ali Shibli's wildfire tool, which this repository is a fork of; `style.css`
 still imports that stylesheet from `../wildfire-demo/`. This directory swaps in

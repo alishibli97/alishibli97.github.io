@@ -1,0 +1,153 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#07110f">
+  <meta name="description" content="Select a location and run wildfire burned-area inference from live Sentinel-2 imagery loaded through Google Earth Engine.">
+  <title>Earth Engine Wildfire Lab — Ali Shibli</title>
+  <link rel="icon" href="../../img/favicon.png" type="image/png">
+  <link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.css">
+  <link rel="stylesheet" href="./style.css">
+</head>
+<body>
+  <header class="site-header">
+    <a class="wordmark" href="../../"><span aria-hidden="true">AS</span><b>Wildfire Model Lab</b></a>
+    <nav class="model-selector" aria-label="Choose wildfire model">
+      <a href="../"><span>Canada</span><b>FlameNet-S2</b></a>
+      <a href="./" aria-current="page"><span>United States</span><b>US progression</b></a>
+    </nav>
+    <a class="portfolio-link" href="../../">Portfolio ↗</a>
+  </header>
+
+  <main>
+    <section class="tool-intro">
+      <p>Research tool · Sentinel-2 B12/B8/B4 · 20 m</p>
+      <h1>Wildfire progression from live Earth Engine imagery</h1>
+      <span>Select a known dataset event or define a scene, then run the model locally in your browser.</span>
+    </section>
+
+    <section class="workspace connection" aria-labelledby="connection-title">
+      <div class="section-heading">
+        <div><p>01 / Connection</p><h2 id="connection-title">Connect Earth Engine</h2></div>
+        <div class="engine-status" id="ee-status"><span></span><b>Not connected</b></div>
+      </div>
+      <div class="connection-grid">
+        <label><span>Google Cloud project</span><input id="project-id" value="lebanese-sport-pitches" autocomplete="off"></label>
+        <label><span>OAuth client ID</span><input id="client-id" type="text" placeholder="…apps.googleusercontent.com" autocomplete="off"></label>
+        <button id="connect-button" class="run-button" type="button"><span>Connect Google account</span><i aria-hidden="true">→</i></button>
+      </div>
+      <details class="setup-help">
+        <summary>One-time OAuth setup instructions</summary>
+        <ol>
+          <li>In Google Cloud Console, use the Earth Engine-enabled project and create an OAuth 2.0 <b>Web application</b> client.</li>
+          <li>Add <code>https://alishibli97.github.io</code> as an authorized JavaScript origin.</li>
+          <li>Paste the resulting client ID above. A client ID is public configuration; never paste a client secret or service-account key.</li>
+        </ol>
+        <a href="https://developers.google.com/earth-engine/custom-apps/client-js" target="_blank" rel="noreferrer">Official Earth Engine setup guide ↗</a>
+      </details>
+      <p class="message" id="connection-message" role="status" aria-live="polite"></p>
+    </section>
+
+    <section class="workspace explorer" id="explorer" aria-labelledby="explorer-title">
+      <div class="section-heading">
+        <div><p>02 / Area and dates</p><h2 id="explorer-title">Choose the fire scene</h2></div>
+        <p class="section-note">Click the map or enter coordinates.</p>
+      </div>
+
+      <div class="example-picker">
+        <label for="scene-preset"><span>Examples from the forest-fire dataset</span>
+          <select id="scene-preset">
+            <option value="" disabled>Custom scene</option>
+            <option value="US_2017_AZ3442311084220170601">2017 · Arizona · 8,013 ha</option>
+            <option value="US_2018_CA4114012366020180816">2018 · California · 9,869 ha</option>
+            <option value="US_2020_OR4403912052820200816">2020 · Oregon · 9,751 ha</option>
+            <option value="US_2022_MO3793309102520220328">2022 · Missouri · 9,830 ha</option>
+            <option value="US_2023_OR4242612068520230918" selected>2023 · Oregon · 5,812 ha</option>
+          </select>
+        </label>
+        <p id="preset-meta">US_2023_OR4242612068520230918 · Trees majority · target date drawn from its downloaded progression</p>
+      </div>
+
+      <div class="explorer-grid" id="map-workspace">
+        <div class="map-wrap">
+          <div id="map" aria-label="Map for selecting the wildfire location"></div>
+          <button id="map-expand" class="map-expand" type="button" aria-pressed="false"><span>Enlarge map</span><b aria-hidden="true">⛶</b></button>
+          <div class="map-caption"><span>OpenStreetMap · click to move ROI</span><b id="map-coordinate">42.4135, −120.6620</b></div>
+        </div>
+        <div class="controls-panel">
+          <div class="field-pair">
+            <label><span>Latitude</span><input id="latitude" type="number" step="0.0001" value="42.413549"></label>
+            <label><span>Longitude</span><input id="longitude" type="number" step="0.0001" value="-120.661961"></label>
+          </div>
+          <label><span>ROI width <output id="roi-value">5.60 km</output></span><input id="roi-size" type="range" min="2.56" max="10" value="5.60" step="0.16"></label>
+          <div class="field-pair">
+            <label><span>Ignition date</span><input id="ignition-date" type="date" value="2023-09-18"></label>
+            <label><span>Target observation</span><input id="target-date" type="date" value="2023-10-06"></label>
+          </div>
+          <div class="field-pair compact-fields">
+            <label><span>Pre-fire lookback</span><select id="pre-window"><option value="30" selected>30 days</option><option value="45">45 days</option><option value="60">60 days</option></select></label>
+            <label><span>Target search radius</span><select id="target-window"><option value="5" selected>±5 days</option><option value="10">±10 days</option><option value="15">±15 days</option></select></label>
+          </div>
+          <button id="run-button" class="run-button run-ee" type="button" disabled><span>Find imagery and run model</span><i aria-hidden="true">→</i></button>
+        </div>
+      </div>
+
+      <div class="progress-wrap" id="progress-wrap" hidden>
+        <div class="progress-label"><span id="progress-text">Preparing Earth Engine request…</span><span id="progress-value">0%</span></div>
+        <div class="progress-track"><span id="progress-bar"></span></div>
+      </div>
+      <p class="message" id="message" role="status" aria-live="polite"></p>
+    </section>
+
+    <section class="results" id="results" aria-labelledby="results-title" hidden>
+      <div class="section-heading results-heading">
+        <div><p>03 / Output</p><h2 id="results-title">Current burned extent</h2></div>
+        <div class="threshold-control">
+          <label for="threshold">Probability cutoff <output id="threshold-value">0.60</output></label>
+          <input id="threshold" type="range" min="0.10" max="0.90" value="0.60" step="0.01">
+        </div>
+      </div>
+
+      <div class="band-key" aria-label="Sentinel-2 dataset band order">
+        <span><b>B12</b> SWIR2 → red</span><span><b>B8</b> NIR → green</span><span><b>B4</b> Red → blue</span>
+      </div>
+
+      <div class="selection-summary">
+        <article><span>Selected pre-fire</span><strong id="pre-date-summary">—</strong><small id="pre-clear-summary">—</small></article>
+        <article><span>Selected current</span><strong id="current-date-summary">—</strong><small id="current-clear-summary">—</small></article>
+        <article><span>Elapsed from ignition</span><strong id="elapsed-summary">—</strong><small id="engine-summary">—</small></article>
+        <article><span>Predicted burned</span><strong id="burned-summary">—</strong><small id="pixel-summary">—</small></article>
+      </div>
+
+      <div class="canvas-grid">
+        <figure><div class="canvas-shell"><canvas id="pre-canvas"></canvas></div><figcaption><b>Selected pre-fire</b><span>B12 / B8 / B4 · dataset order</span></figcaption></figure>
+        <figure><div class="canvas-shell"><canvas id="current-canvas"></canvas></div><figcaption><b>Selected current</b><span>B12 / B8 / B4 · dataset order</span></figcaption></figure>
+        <figure><div class="canvas-shell"><canvas id="probability-canvas"></canvas></div><figcaption><b>Burn probability</b><span>Black → orange → white</span></figcaption></figure>
+        <figure><div class="canvas-shell"><canvas id="mask-canvas"></canvas></div><figcaption><b>Binary prediction</b><span>White burned · black unburned · grey invalid</span></figcaption></figure>
+      </div>
+
+      <div class="result-actions">
+        <button id="download-mask" type="button">Download mask PNG <span aria-hidden="true">↓</span></button>
+        <button id="download-stack" type="button">Download source GeoTIFF <span aria-hidden="true">↓</span></button>
+      </div>
+    </section>
+
+    <section class="method">
+      <div><p>04 / Important</p><h2>A research demonstrator, not an emergency product.</h2></div>
+      <div class="method-copy">
+        <p>The imagery pipeline mirrors the dataset: Sentinel-2 L1C harmonized SWIR2/NIR/Red, Cloud Score+ <code>cs_cdf ≥ 0.60</code>, reflectance clamped to 0–5000, and a 20 m output grid. It selects a clear daily mosaic near each requested date.</p>
+        <p><strong>The output segments burning already visible in the current image.</strong> It does not predict ignition or future spread. Cloud, smoke, snow, misregistration, unfamiliar ecosystems, and imagery outside the training years can cause errors.</p>
+      </div>
+    </section>
+  </main>
+
+  <footer><span>Research prototype · 2026</span><a href="mailto:shibli@kth.se">shibli@kth.se</a></footer>
+
+  <script src="https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.js"></script>
+  <script src="https://ajax.googleapis.com/ajax/libs/earthengine/1.7.47/earthengine-api.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/onnxruntime-web@1.23.2/dist/ort.webgpu.min.js"></script>
+  <script type="module" src="./app.js"></script>
+</body>
+</html>

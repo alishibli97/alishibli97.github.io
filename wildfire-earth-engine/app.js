@@ -392,6 +392,8 @@ function connectEarthEngine() {
   }
   localStorage.setItem("flamenet-ee-project", projectId);
   localStorage.setItem("flamenet-ee-client-id", clientId);
+  localStorage.setItem("wildfire-ee-project", projectId);
+  localStorage.setItem("wildfire-ee-client-id", clientId);
 
   if (state.authPopupReady) {
     state.authPopupReady = false;
@@ -1199,8 +1201,12 @@ elements.threshold.addEventListener("input", () => {
 elements.downloadMask.addEventListener("click", downloadMask);
 elements.downloadStack.addEventListener("click", downloadSourceStack);
 
-elements.projectId.value = localStorage.getItem("flamenet-ee-project") || elements.projectId.value;
-elements.clientId.value = localStorage.getItem("flamenet-ee-client-id") || "";
+elements.projectId.value = localStorage.getItem("flamenet-ee-project")
+  || localStorage.getItem("wildfire-ee-project")
+  || elements.projectId.value;
+elements.clientId.value = localStorage.getItem("flamenet-ee-client-id")
+  || localStorage.getItem("wildfire-ee-client-id")
+  || "";
 initializeMap();
 
 loadMeta()
