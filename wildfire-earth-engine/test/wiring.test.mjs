@@ -70,7 +70,7 @@ test("the ids app.js requests are not stale leftovers of the upstream page", () 
 });
 
 test("the page loads the model from its own directory, not the other demo's", () => {
-  // ../wildfire-demo/model.onnx is a different model for a different page.
+  // The Canadian model must remain isolated from the US model in the parent app.
   assert.ok(!appSource.includes("wildfire-demo"),
     "app.js points at the upstream demo's model");
   assert.match(appSource, /const MODEL_DIR = "\.\/model\/"/);

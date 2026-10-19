@@ -13,9 +13,9 @@ different imagery selection and preprocessing; they share only the saved Earth
 Engine project and public OAuth client ID in browser storage.
 
 The page design, the Earth Engine OAuth flow, the map and the canvas layout come
-from Ali Shibli's wildfire tool, which this repository is a fork of; `ca/style.css`
-still imports that stylesheet from `../wildfire-demo/`. This directory swaps in
-FlameNet-S2 and the preprocessing that model requires.
+from Ali Shibli's wildfire tool. Both country routes inherit their shared design
+from `base.css`; the Canadian route swaps in FlameNet-S2 and the preprocessing
+that model requires.
 
 ```
 ca/index.html   the FlameNet-S2 page
@@ -23,6 +23,8 @@ ca/app.js       Earth Engine queries, the inference loop, rendering
 ca/pipeline.js  the numeric core, with no DOM or network: testable in node
 ca/style.css    the framework's stylesheet plus this page's overrides
 ca/model/       the exported graphs and the preprocessing constants
+base.css        shared visual foundation for the US and Canadian pages
+model.onnx      the US wildfire-progression model
 test/           node tests against the research implementation
 ```
 

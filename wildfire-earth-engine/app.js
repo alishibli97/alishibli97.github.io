@@ -1,6 +1,6 @@
 import { fromArrayBuffer } from "https://cdn.jsdelivr.net/npm/geotiff@2.1.3/+esm";
 
-const MODEL_PATH = "../wildfire-demo/model.onnx";
+const MODEL_PATH = "./model.onnx";
 const ORT_ASSET_PATH = "https://cdn.jsdelivr.net/npm/onnxruntime-web@1.23.2/dist/";
 const EE_SCOPE = "https://www.googleapis.com/auth/earthengine.readonly";
 const S2_COLLECTION = "COPERNICUS/S2_HARMONIZED";
