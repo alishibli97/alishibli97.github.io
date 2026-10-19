@@ -40,7 +40,3 @@ If the OAuth consent screen is in testing mode, add your Google account under **
 8. Select **Find imagery and run model**.
 
 The application will find suitable Sentinel-2 imagery through Earth Engine and display the burned-area prediction when processing finishes. Large areas require more memory and take longer, particularly when the model runs on the CPU.
-
-## Important
-
-This is a research demonstration, not an operational emergency or fire-warning system. Cloud, smoke, snow, unavailable imagery, and locations outside the model's training domain can affect the results.
