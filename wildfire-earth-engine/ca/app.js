@@ -55,7 +55,7 @@ import {
   sampleContext, standardise, standardiseInto, windowStarts,
 // ?v= must match index.html's. A fresh app.js next to a cached pipeline.js is
 // worse than both being stale: the numeric core and its caller would disagree.
-} from "./pipeline.js?v=5";
+} from "./pipeline.js?v=6";
 
 const MODEL_DIR = "./model/";
 const ORT_ASSET_PATH = "https://cdn.jsdelivr.net/npm/onnxruntime-web@1.23.2/dist/";
