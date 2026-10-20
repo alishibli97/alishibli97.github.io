@@ -59,6 +59,8 @@ const elements = {
   connectButton: document.querySelector("#connect-button"),
   eeStatus: document.querySelector("#ee-status"),
   connectionMessage: document.querySelector("#connection-message"),
+  setupHelp: document.querySelector("#setup-help"),
+  pageOrigin: document.querySelector("#page-origin"),
   scenePreset: document.querySelector("#scene-preset"),
   presetMeta: document.querySelector("#preset-meta"),
   latitude: document.querySelector("#latitude"),
@@ -832,5 +834,7 @@ elements.projectId.value = localStorage.getItem("wildfire-ee-project")
 elements.clientId.value = localStorage.getItem("wildfire-ee-client-id")
   || localStorage.getItem("flamenet-ee-client-id")
   || "";
+elements.pageOrigin.textContent = location.origin;
+elements.setupHelp.open = !(elements.projectId.value && elements.clientId.value);
 initializeMap();
 applyScenePreset(elements.scenePreset.value);

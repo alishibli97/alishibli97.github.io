@@ -7,9 +7,21 @@
 /* FlameNet-S2 deployment: five summary cards instead of four, the model
    identity line under the title, and a header carrying only the wordmark.
 
-   The @import above pulls in the shared page design from the parent app. */
+   The @import above pulls in the page design this tool is built on. If the
+   rest of this repository is ever pruned, that file has to come along or the
+   page loads unstyled. */
 .selection-summary{grid-template-columns:repeat(5,1fr)}
-.tool-intro .model-line{margin:18px 0 0;max-width:680px;color:var(--muted);font-size:11px;font-weight:400;letter-spacing:.02em;text-transform:none;line-height:1.7}
+/* The picker was a two-column grid. The acquisition select is a third child
+   that is present only for the during-fire presets, and a grid would leave a
+   hole in its column when it is hidden, so lay the row out with flex. */
+.example-picker{display:flex;flex-wrap:wrap;align-items:center;gap:18px}
+.example-picker>label:first-child{flex:1 1 300px}
+.example-picker>#during-date-field{flex:0 1 230px}
+/* The framework sets .example-picker label{display:flex}, an author rule that
+   beats the UA stylesheet's [hidden]{display:none}. Without this the hidden
+   acquisition select would stay on screen for every preset. */
+.example-picker>#during-date-field[hidden]{display:none}
+.example-picker>p{flex:1 1 230px}
 .band-key span:last-child b{color:var(--orange)}
 @media(max-width:1180px){.selection-summary{grid-template-columns:repeat(3,1fr)}.selection-summary article:nth-child(3){border-right:0}.selection-summary article:nth-child(-n+3){border-bottom:1px solid var(--line)}}
 @media(max-width:900px){.selection-summary{grid-template-columns:1fr 1fr}.selection-summary article:nth-child(2n){border-right:0}.selection-summary article:nth-child(-n+4){border-bottom:1px solid var(--line)}}

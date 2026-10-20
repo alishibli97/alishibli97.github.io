@@ -8,7 +8,12 @@
   <title>FlameNet-S2 · Sentinel-2 burned-area mapping</title>
   <link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin>
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.css">
-  <link rel="stylesheet" href="./style.css?v=20261018-2">
+  <!-- ?v= is a cache buster, not decoration. GitHub Pages serves these with
+       cache-control: max-age=600, so after a deploy a browser can hold a stale
+       app.js next to a fresh index.html and show the previous build's presets.
+       Bump the number in all three places whenever app.js, pipeline.js or
+       style.css changes. -->
+  <link rel="stylesheet" href="./style.css?v=5">
 </head>
 <body>
   <header class="site-header">
@@ -24,8 +29,6 @@
     <section class="tool-intro">
       <p>Research tool · FlameNet-S2 · Sentinel-2 L2A · 20 m</p>
       <h1>Burned area from live Earth Engine imagery</h1>
-      <span>Pick a dataset event or define your own scene. The imagery comes from Earth Engine; the model runs in this browser and nothing is uploaded anywhere.</span>
-      <p class="model-line" id="model-summary">Loading model metadata…</p>
     </section>
 
     <section class="workspace connection" aria-labelledby="connection-title">
@@ -38,18 +41,20 @@
         <label><span>OAuth client ID</span><input id="client-id" type="text" placeholder="…apps.googleusercontent.com" autocomplete="off"></label>
         <button id="connect-button" class="run-button" type="button"><span>Connect Google account</span><i aria-hidden="true">→</i></button>
       </div>
-      <details class="setup-help">
-        <summary>One-time setup — you need your own Earth Engine access</summary>
-        <p>This page has no server and no credentials of its own: it runs on <b>your</b> Google account and <b>your</b> Earth Engine project. Both fields above are yours to fill, once; the browser remembers them afterwards.</p>
+      <details class="setup-help" id="setup-help">
+        <summary>One-time setup — about five minutes, and you only do it once</summary>
+        <p>This page has no server and no credentials of its own: it runs on <b>your</b> Google account and <b>your</b> Earth Engine project. The two fields above are yours to fill in once; the browser remembers them afterwards. Each step below links to the exact console page it refers to.</p>
         <ol>
-          <li>Have a Google Cloud project with the <b>Earth Engine API enabled</b> and registered for Earth Engine. Put its project ID in the first field.</li>
-          <li>In that project, under <b>APIs &amp; Services → Credentials</b>, create an OAuth 2.0 client of type <b>Web application</b>.</li>
-          <li>Add this site's origin — scheme and host only, no path, no trailing slash — to its <b>Authorized JavaScript origins</b>. Without this, Google refuses the sign-in.</li>
-          <li>Paste the client ID, the value ending <code>.apps.googleusercontent.com</code>, into the second field. A client ID is public configuration. <b>Never paste the client secret</b> (it starts <code>GOCSPX-</code>) or a service-account key — this page does not use either.</li>
-          <li>If Google answers <i>"has not completed the Google verification process"</i>, your consent screen is in <b>Testing</b>: add the account you sign in with under <b>Audience → Test users</b>. Keep it in Testing — publishing a sensitive scope triggers a manual review that takes weeks and buys nothing here.</li>
-          <li>The one permission requested is <code>earthengine.readonly</code>. Earth Engine charges the pixel computation to the project you named; the model itself runs on this machine.</li>
+          <li><b>Create or pick a Google Cloud project.</b> <a href="https://console.cloud.google.com/projectcreate" target="_blank" rel="noreferrer">console.cloud.google.com/projectcreate ↗</a><br>Copy its <b>project ID</b> — the lowercase one, not the display name — into <b>Google Cloud project</b> above.</li>
+          <li><b>Register that project for Earth Engine.</b> <a href="https://code.earthengine.google.com/register" target="_blank" rel="noreferrer">code.earthengine.google.com/register ↗</a><br>Pick noncommercial use if you qualify. Earth Engine access belongs to the project, not to your account, so this has to be the same project as step 1.</li>
+          <li><b>Enable the Earth Engine API in it.</b> <a href="https://console.cloud.google.com/apis/library/earthengine.googleapis.com" target="_blank" rel="noreferrer">API library → Earth Engine API ↗</a></li>
+          <li><b>Set up the consent screen.</b> <a href="https://console.cloud.google.com/auth/overview" target="_blank" rel="noreferrer">Google Auth Platform → Overview ↗</a><br>If the page says <i>"Google Auth platform not configured yet"</i>, press <b>Get Started</b> and fill in an app name, a support email, an audience and a contact email. <b>Do this first</b> — until it is done the Audience and Clients pages in the next two steps do not exist, which is the usual reason they cannot be found. For audience pick <b>External</b>, unless your account is in a Google Workspace organisation and everyone using this page is too.<br>In the console's menu this lives under <b>Google Auth Platform</b>. It used to be <i>APIs &amp; Services → OAuth consent screen</i>, which is gone; guides still naming it are out of date.</li>
+          <li><b>Add yourself as a test user, and stay in Testing.</b> <a href="https://console.cloud.google.com/auth/audience" target="_blank" rel="noreferrer">Google Auth Platform → Audience ↗</a><br>Under <b>Test users</b> press <b>Add users</b> and enter the Google account you will sign in with. Miss this and Google answers <i>"has not completed the Google verification process"</i> instead of signing you in. Leave publishing status at <b>Testing</b>: publishing a sensitive scope triggers a manual review that takes weeks and buys nothing here. (An Internal audience has no test-user list and needs none.)</li>
+          <li><b>Create an OAuth client of type Web application.</b> <a href="https://console.cloud.google.com/auth/clients" target="_blank" rel="noreferrer">Clients → Create client ↗</a><br>Under <b>Authorized JavaScript origins</b> add exactly <code id="page-origin">this page's origin</code> — scheme and host, no path, no trailing slash. This is the step that is usually wrong: without it Google refuses the sign-in.</li>
+          <li><b>Paste the client ID into the second field above.</b> It is the value ending <code>.apps.googleusercontent.com</code>.<br>A client ID is public configuration and is meant to be visible. <b>Never paste the client secret</b> (it starts <code>GOCSPX-</code>) or a service-account key — this page uses neither.</li>
+          <li><b>Press Connect Google account.</b><br>The one permission requested is <code>earthengine.readonly</code>. Earth Engine bills the pixel computation to the project you named; the model runs in this browser, and no imagery or result is uploaded anywhere.</li>
         </ol>
-        <a href="https://developers.google.com/earth-engine/custom-apps/client-js" target="_blank" rel="noreferrer">Official Earth Engine setup guide ↗</a>
+        <a href="https://developers.google.com/earth-engine/custom-apps/client-js" target="_blank" rel="noreferrer">Google's own guide to client-side Earth Engine apps ↗</a>
       </details>
       <p class="message" id="connection-message" role="status" aria-live="polite"></p>
     </section>
@@ -61,15 +66,14 @@
       </div>
 
       <div class="example-picker">
-        <label for="scene-preset"><span>Events from the NBAC Canada dataset and the validation fires</span>
-          <select id="scene-preset">
-            <option value="" disabled>Custom scene</option>
-            <option value="CA_2025_SK_433">2025 · Saskatchewan · 170,576 ha · test split</option>
-            <option value="CA_2025_AB_480">2025 · Alberta · 119,527 ha · test split</option>
-            <option value="CA_2025_ON_594">2025 · Ontario · 159,734 ha · test split</option>
-            <option value="CA_2026_BC_K70748" selected>2026 · BC · K70748 · independent validation</option>
-            <option value="ID_2026_KETAPANG">2026 · Ketapang, Kalimantan · out of domain</option>
-          </select>
+        <label for="scene-preset"><span>35 Canadian fires mapped after they stopped burning, 15 followed through 308 acquisitions while they burned, and two independently checked events</span>
+          <!-- Options are built by app.js from SCENE_PRESETS; see there. -->
+          <select id="scene-preset"></select>
+        </label>
+        <!-- Only the during-fire presets carry a series; app.js shows this for
+             them and hides it for everything else. -->
+        <label for="during-date" id="during-date-field" hidden><span>Acquisition</span>
+          <select id="during-date"></select>
         </label>
         <p id="preset-meta">Loading presets…</p>
       </div>
@@ -147,6 +151,6 @@
   <script src="https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.js"></script>
   <script src="https://ajax.googleapis.com/ajax/libs/earthengine/1.7.47/earthengine-api.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/onnxruntime-web@1.23.2/dist/ort.webgpu.min.js"></script>
-  <script type="module" src="./app.js?v=20261018-2"></script>
+  <script type="module" src="./app.js?v=5"></script>
 </body>
 </html>

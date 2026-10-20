@@ -53,7 +53,9 @@ import {
   blendWindow, blitChannel, chunkEdges, cloudKeepMask, convertChannel, extractPatch,
   falseColour, gaussianWeight, jointRamp, normaliseBlend, removeSmallComponents,
   sampleContext, standardise, standardiseInto, windowStarts,
-} from "./pipeline.js";
+// ?v= must match index.html's. A fresh app.js next to a cached pipeline.js is
+// worse than both being stale: the numeric core and its caller would disagree.
+} from "./pipeline.js?v=5";
 
 const MODEL_DIR = "./model/";
 const ORT_ASSET_PATH = "https://cdn.jsdelivr.net/npm/onnxruntime-web@1.23.2/dist/";
@@ -75,50 +77,468 @@ const NODATA = -9999;
 // Phase-prefixed band names in the order both requests return them.
 const PHASES = ["pre", "post"];
 
+// Preset fires, all from the NBAC Canada archive's 2024 and 2025 tiles. Every
+// number here is what the research loader derives for the tile rather than
+// something typed in: the centre of the burned bounding box, a window that
+// holds that box with a margin, and the two acquisitions
+// src/datasets/s2_fire.py selects under its clearest-scene rule. The set spans
+// the size range a window can actually hold, 117 ha to 170,576 ha, across ten
+// provinces and territories. Nothing larger is offered because nothing larger
+// fits: the archive's biggest scar spans 157 km against the widest window's
+// 100 km, and a preset that cannot show the whole fire is a bad demonstration.
 const SCENE_PRESETS = Object.freeze({
-  // Test-split fires (2025, held out of training and validation). Dates are the
-  // scenes src/datasets/s2_fire.py itself selects for these tiles, so the demo
-  // runs on exactly the pair the reported test metrics were computed from.
+  // Over 100,000 ha
   CA_2025_SK_433: {
-    label: "2025 · Saskatchewan · 170,576 ha",
+    label: "2025 · SK 433 · 170,576 ha", group: "Over 100,000 ha",
     latitude: 54.8299, longitude: -102.3205,
-    detailKm: 71.68,
+    detailKm: 81.92,
     pre: "2024-09-15", target: "2025-11-04",
-    note: "NBAC test split · boreal forest · model never saw 2025",
+    note: "Saskatchewan · NBAC reference perimeter 170,576 ha",
   },
-  CA_2025_AB_480: {
-    label: "2025 · Alberta · 119,527 ha",
-    latitude: 56.9163, longitude: -113.6742,
-    detailKm: 58.88,
-    pre: "2024-08-11", target: "2025-10-15",
-    note: "NBAC test split · mixed boreal · model never saw 2025",
+  CA_2025_MB_432: {
+    label: "2025 · MB 432 · 163,472 ha", group: "Over 100,000 ha",
+    latitude: 55.9014, longitude: -100.8577,
+    detailKm: 81.92,
+    pre: "2024-06-09", target: "2025-09-29",
+    note: "Manitoba · NBAC reference perimeter 163,472 ha",
   },
   CA_2025_ON_594: {
-    label: "2025 · Ontario · 159,734 ha",
-    latitude: 52.8423, longitude: -93.8993,
-    detailKm: 69.12,
+    label: "2025 · ON 594 · 159,734 ha", group: "Over 100,000 ha",
+    latitude: 52.8422, longitude: -93.8993,
+    detailKm: 74.24,
     pre: "2024-06-10", target: "2025-08-31",
-    note: "NBAC test split · boreal shield · model never saw 2025",
+    note: "Ontario · NBAC reference perimeter 159,734 ha",
   },
-  // The supervisor's independent check fire: outside the NBAC splits entirely,
-  // validated against a BC Wildfire Service airborne-GPS perimeter.
+  CA_2024_NT_53: {
+    label: "2024 · NT 53 · 136,935 ha", group: "Over 100,000 ha",
+    latitude: 60.8278, longitude: -117.9208,
+    detailKm: 66.56,
+    pre: "2023-06-09", target: "2024-09-29",
+    note: "Northwest Territories · NBAC reference perimeter 136,935 ha",
+  },
+  CA_2025_AB_480: {
+    label: "2025 · AB 480 · 119,527 ha", group: "Over 100,000 ha",
+    latitude: 56.9162, longitude: -113.6741,
+    detailKm: 64.0,
+    pre: "2024-08-11", target: "2025-10-15",
+    note: "Alberta · NBAC reference perimeter 119,527 ha",
+  },
+  // 30,000 – 100,000 ha
+  CA_2024_AB_24: {
+    label: "2024 · AB 24 · 81,143 ha", group: "30,000 – 100,000 ha",
+    latitude: 59.7966, longitude: -118.5372,
+    detailKm: 56.32,
+    pre: "2023-07-04", target: "2024-10-06",
+    note: "Alberta · NBAC reference perimeter 81,143 ha",
+  },
+  CA_2025_BC_503: {
+    label: "2025 · BC 503 · 59,312 ha", group: "30,000 – 100,000 ha",
+    latitude: 59.4362, longitude: -120.2324,
+    detailKm: 51.2,
+    pre: "2024-07-16", target: "2025-10-04",
+    note: "British Columbia · NBAC reference perimeter 59,312 ha",
+  },
+  CA_2025_SK_354: {
+    label: "2025 · SK 354 · 56,380 ha", group: "30,000 – 100,000 ha",
+    latitude: 56.7579, longitude: -109.2857,
+    detailKm: 53.76,
+    pre: "2024-06-29", target: "2025-10-09",
+    note: "Saskatchewan · NBAC reference perimeter 56,380 ha",
+  },
+  CA_2024_YT_416: {
+    label: "2024 · YT 416 · 42,263 ha", group: "30,000 – 100,000 ha",
+    latitude: 62.3587, longitude: -140.0666,
+    detailKm: 38.4,
+    pre: "2023-06-02", target: "2024-10-01",
+    note: "Yukon · NBAC reference perimeter 42,263 ha",
+  },
+  CA_2025_NT_190: {
+    label: "2025 · NT 190 · 32,137 ha", group: "30,000 – 100,000 ha",
+    latitude: 64.2227, longitude: -120.1901,
+    detailKm: 40.96,
+    pre: "2024-06-02", target: "2025-09-27",
+    note: "Northwest Territories · NBAC reference perimeter 32,137 ha",
+  },
+  // 10,000 – 30,000 ha
+  CA_2025_NT_193: {
+    label: "2025 · NT 193 · 19,936 ha", group: "10,000 – 30,000 ha",
+    latitude: 60.2148, longitude: -117.0583,
+    detailKm: 35.84,
+    pre: "2024-06-01", target: "2025-09-26",
+    note: "Northwest Territories · NBAC reference perimeter 19,936 ha",
+  },
+  CA_2025_SK_312: {
+    label: "2025 · SK 312 · 18,616 ha", group: "10,000 – 30,000 ha",
+    latitude: 58.3016, longitude: -102.2367,
+    detailKm: 35.84,
+    pre: "2024-06-30", target: "2025-09-13",
+    note: "Saskatchewan · NBAC reference perimeter 18,616 ha",
+  },
+  CA_2024_NL_566: {
+    label: "2024 · NL 566 · 14,804 ha", group: "10,000 – 30,000 ha",
+    latitude: 53.9746, longitude: -66.8837,
+    detailKm: 33.28,
+    pre: "2023-06-03", target: "2024-08-11",
+    note: "Newfoundland and Labrador · NBAC reference perimeter 14,804 ha",
+  },
+  CA_2024_PC_101: {
+    label: "2024 · PC 101 · 14,117 ha", group: "10,000 – 30,000 ha",
+    latitude: 61.4329, longitude: -125.956,
+    detailKm: 23.04,
+    pre: "2023-06-28", target: "2024-10-08",
+    note: "Parks Canada · NBAC reference perimeter 14,117 ha",
+  },
+  CA_2024_BC_166: {
+    label: "2024 · BC 166 · 11,410 ha", group: "10,000 – 30,000 ha",
+    latitude: 53.0419, longitude: -121.3502,
+    detailKm: 28.16,
+    pre: "2023-06-07", target: "2024-09-01",
+    note: "British Columbia · NBAC reference perimeter 11,410 ha",
+  },
+  // 3,000 – 10,000 ha
+  CA_2025_ON_630: {
+    label: "2025 · ON 630 · 9,013 ha", group: "3,000 – 10,000 ha",
+    latitude: 52.3126, longitude: -93.0557,
+    detailKm: 25.6,
+    pre: "2024-06-10", target: "2025-09-13",
+    note: "Ontario · NBAC reference perimeter 9,013 ha",
+  },
+  CA_2024_BC_246: {
+    label: "2024 · BC 246 · 4,545 ha", group: "3,000 – 10,000 ha",
+    latitude: 49.0611, longitude: -120.537,
+    detailKm: 17.92,
+    pre: "2023-06-06", target: "2024-08-29",
+    note: "British Columbia · NBAC reference perimeter 4,545 ha",
+  },
+  CA_2025_NT_175: {
+    label: "2025 · NT 175 · 4,405 ha", group: "3,000 – 10,000 ha",
+    latitude: 66.899, longitude: -133.5455,
+    detailKm: 17.92,
+    pre: "2024-06-02", target: "2025-08-26",
+    note: "Northwest Territories · NBAC reference perimeter 4,405 ha",
+  },
+  CA_2025_YT_381: {
+    label: "2025 · YT 381 · 3,582 ha", group: "3,000 – 10,000 ha",
+    latitude: 61.6, longitude: -134.9913,
+    detailKm: 17.92,
+    pre: "2024-06-07", target: "2025-11-04",
+    note: "Yukon · NBAC reference perimeter 3,582 ha",
+  },
+  CA_2024_QC_510: {
+    label: "2024 · QC 510 · 3,251 ha", group: "3,000 – 10,000 ha",
+    latitude: 51.8883, longitude: -76.4416,
+    detailKm: 17.92,
+    pre: "2023-06-05", target: "2024-08-28",
+    note: "Quebec · NBAC reference perimeter 3,251 ha",
+  },
+  // 1,000 – 3,000 ha
+  CA_2025_NT_176: {
+    label: "2025 · NT 176 · 2,639 ha", group: "1,000 – 3,000 ha",
+    latitude: 67.3469, longitude: -135.1873,
+    detailKm: 17.92,
+    pre: "2024-06-01", target: "2025-10-14",
+    note: "Northwest Territories · NBAC reference perimeter 2,639 ha",
+  },
+  CA_2025_MB_32: {
+    label: "2025 · MB 32 · 2,070 ha", group: "1,000 – 3,000 ha",
+    latitude: 55.7276, longitude: -92.8489,
+    detailKm: 17.92,
+    pre: "2024-06-10", target: "2025-10-11",
+    note: "Manitoba · NBAC reference perimeter 2,070 ha",
+  },
+  CA_2024_BC_227: {
+    label: "2024 · BC 227 · 2,052 ha", group: "1,000 – 3,000 ha",
+    latitude: 53.1222, longitude: -124.4631,
+    detailKm: 17.92,
+    pre: "2023-06-07", target: "2024-11-18",
+    note: "British Columbia · NBAC reference perimeter 2,052 ha",
+  },
+  CA_2025_ON_644: {
+    label: "2025 · ON 644 · 2,003 ha", group: "1,000 – 3,000 ha",
+    latitude: 53.594, longitude: -90.6464,
+    detailKm: 17.92,
+    pre: "2024-06-17", target: "2025-09-30",
+    note: "Ontario · NBAC reference perimeter 2,003 ha",
+  },
+  CA_2024_YT_446: {
+    label: "2024 · YT 446 · 1,801 ha", group: "1,000 – 3,000 ha",
+    latitude: 62.8554, longitude: -138.4788,
+    detailKm: 17.92,
+    pre: "2023-07-06", target: "2024-10-01",
+    note: "Yukon · NBAC reference perimeter 1,801 ha",
+  },
+  // 300 – 1,000 ha
+  CA_2024_QC_1516: {
+    label: "2024 · QC 1516 · 930 ha", group: "300 – 1,000 ha",
+    latitude: 54.1131, longitude: -73.3452,
+    detailKm: 17.92,
+    pre: "2023-06-02", target: "2024-08-10",
+    note: "Quebec · NBAC reference perimeter 930 ha",
+  },
+  CA_2025_BC_548: {
+    label: "2025 · BC 548 · 665 ha", group: "300 – 1,000 ha",
+    latitude: 49.3078, longitude: -116.9902,
+    detailKm: 17.92,
+    pre: "2024-06-07", target: "2025-10-15",
+    note: "British Columbia · NBAC reference perimeter 665 ha",
+  },
+  CA_2024_YT_427: {
+    label: "2024 · YT 427 · 527 ha", group: "300 – 1,000 ha",
+    latitude: 65.368, longitude: -137.6736,
+    detailKm: 17.92,
+    pre: "2023-06-04", target: "2024-10-06",
+    note: "Yukon · NBAC reference perimeter 527 ha",
+  },
+  CA_2025_NT_178: {
+    label: "2025 · NT 178 · 408 ha", group: "300 – 1,000 ha",
+    latitude: 65.5665, longitude: -129.7154,
+    detailKm: 17.92,
+    pre: "2024-06-01", target: "2025-09-04",
+    note: "Northwest Territories · NBAC reference perimeter 408 ha",
+  },
+  CA_2024_AB_1084: {
+    label: "2024 · AB 1084 · 327 ha", group: "300 – 1,000 ha",
+    latitude: 53.497, longitude: -119.7945,
+    detailKm: 17.92,
+    pre: "2023-06-06", target: "2024-08-02",
+    note: "Alberta · NBAC reference perimeter 327 ha",
+  },
+  // Under 300 ha
+  CA_2024_YT_428: {
+    label: "2024 · YT 428 · 261 ha", group: "Under 300 ha",
+    latitude: 64.5262, longitude: -140.2175,
+    detailKm: 17.92,
+    pre: "2023-06-04", target: "2024-10-01",
+    note: "Yukon · NBAC reference perimeter 261 ha",
+  },
+  CA_2024_BC_252: {
+    label: "2024 · BC 252 · 222 ha", group: "Under 300 ha",
+    latitude: 50.0906, longitude: -122.3547,
+    detailKm: 17.92,
+    pre: "2023-06-04", target: "2024-09-16",
+    note: "British Columbia · NBAC reference perimeter 222 ha",
+  },
+  CA_2025_SK_338: {
+    label: "2025 · SK 338 · 194 ha", group: "Under 300 ha",
+    latitude: 59.4192, longitude: -104.3611,
+    detailKm: 17.92,
+    pre: "2024-06-08", target: "2025-09-06",
+    note: "Saskatchewan · NBAC reference perimeter 194 ha",
+  },
+  CA_2025_NT_235: {
+    label: "2025 · NT 235 · 123 ha", group: "Under 300 ha",
+    latitude: 67.4407, longitude: -128.8989,
+    detailKm: 17.92,
+    pre: "2024-06-02", target: "2025-09-25",
+    note: "Northwest Territories · NBAC reference perimeter 123 ha",
+  },
+  CA_2025_AB_486: {
+    label: "2025 · AB 486 · 117 ha", group: "Under 300 ha",
+    latitude: 59.1094, longitude: -115.2929,
+    detailKm: 17.92,
+    pre: "2024-06-15", target: "2025-08-14",
+    note: "Alberta · NBAC reference perimeter 117 ha",
+  },
+  // During the fire — the one regime the post-fire presets above have
+  // none of. Each carries the event's whole Sentinel-2 series from the
+  // CA_S1S2_2000ha progression set, every acquisition taken while the fire
+  // was still burning, and the page runs one of them at a time. The model
+  // is asked for a partial scar under smoke rather than a settled one, so
+  // the area it returns is a fraction of the NBAC final perimeter BY
+  // CONSTRUCTION — the fire had not finished burning. Only the S2 half of
+  // that set is used: it was produced by the checkpoint this page deploys,
+  // while its S1 half came from FLAMENet's SAR model.
+  //
+  // The searches are narrowed because these scenes are days apart while the
+  // scar grows, and because several pre scenes are May acquisitions at 60 N,
+  // where a wider window reaches snow — which Cloud Score+ calls clear.
+  CA_2023_PC_361_DURING: {
+    label: "2023 · PC 361 · 35 dates", group: "During the fire",
+    latitude: 59.2173, longitude: -113.2207,
+    detailKm: 81.92,
+    pre: "2023-05-17", target: "2023-08-02",
+    preWindow: 10, targetWindow: 5,
+    dates: ["2023-05-29", "2023-06-01", "2023-06-03", "2023-06-06", "2023-06-08", "2023-06-11", "2023-06-18", "2023-06-21", "2023-06-28", "2023-07-01", "2023-07-03", "2023-07-06", "2023-07-08", "2023-07-13", "2023-07-16", "2023-07-21", "2023-07-28", "2023-08-02", "2023-08-05", "2023-08-07", "2023-08-12", "2023-08-20", "2023-08-22", "2023-08-25", "2023-08-30", "2023-09-04", "2023-09-09", "2023-09-11", "2023-09-14", "2023-09-16", "2023-09-19", "2023-10-09", "2023-10-11", "2023-10-14", "2023-10-16"],
+    observed: [0.614, 0.636, 0.852, 0.998, 0.85, 0.645, 0.831, 0.996, 0.932, 0.821, 0.671, 0.838, 0.854, 0.638, 0.771, 0.283, 0.891, 0.75, 0.703, 0.932, 0.244, 0.974, 0.994, 0.828, 0.257, 0.987, 0.967, 1, 0.966, 0.952, 0.819, 1, 0.991, 0.992, 0.999],
+    note: "Parks Canada · 35 acquisitions while the fire was burning · NBAC final perimeter 162,453 ha · pre scene from the previous season · final perimeter spans 89 km, past the widest window",
+  },
+  CA_2023_AB_310_DURING: {
+    label: "2023 · AB 310 · 28 dates", group: "During the fire",
+    latitude: 59.8895, longitude: -118.6325,
+    detailKm: 81.92,
+    pre: "2023-05-10", target: "2023-08-21",
+    preWindow: 10, targetWindow: 5,
+    dates: ["2023-05-18", "2023-05-30", "2023-06-04", "2023-06-22", "2023-06-27", "2023-07-04", "2023-07-09", "2023-07-12", "2023-07-19", "2023-07-22", "2023-07-27", "2023-08-06", "2023-08-08", "2023-08-16", "2023-08-21", "2023-08-23", "2023-08-26", "2023-08-28", "2023-09-02", "2023-09-07", "2023-09-10", "2023-09-12", "2023-09-15", "2023-09-17", "2023-09-20", "2023-10-15", "2023-10-20", "2023-11-24"],
+    observed: [0.879, 0.784, 0.859, 0.286, 0.565, 0.878, 0.228, 0.694, 0.211, 0.594, 0.039, 0.855, 0.831, 0.737, 0.629, 0.639, 0.629, 0.739, 0.243, 0.644, 0.878, 0.867, 0.879, 0.861, 0.737, 0.78, 0.879, 0.873],
+    note: "Alberta · 28 acquisitions while the fire was burning · NBAC final perimeter 101,337 ha · pre scene from the same-year spring · final perimeter spans 153 km, past the widest window",
+  },
+  CA_2024_YT_416_DURING: {
+    label: "2024 · YT 416 · 23 dates", group: "During the fire",
+    latitude: 62.3587, longitude: -140.0661,
+    detailKm: 38.4,
+    pre: "2024-05-31", target: "2024-07-21",
+    preWindow: 10, targetWindow: 5,
+    dates: ["2024-06-10", "2024-06-15", "2024-06-16", "2024-06-18", "2024-06-20", "2024-06-23", "2024-06-25", "2024-06-26", "2024-06-28", "2024-06-30", "2024-07-20", "2024-07-21", "2024-07-28", "2024-08-02", "2024-08-04", "2024-08-05", "2024-08-07", "2024-08-10", "2024-08-12", "2024-08-14", "2024-08-15", "2024-08-17", "2024-08-20"],
+    observed: [0.137, 0.625, 0.195, 0.899, 0.794, 0.547, 0.976, 0.847, 0.993, 0.394, 0.939, 0.796, 0.466, 0.563, 1, 0.856, 0.984, 0.622, 0.519, 0.842, 0.838, 0.98, 0.245],
+    note: "Yukon · 23 acquisitions while the fire was burning · NBAC final perimeter 42,263 ha · pre scene from the previous season",
+  },
+  CA_2022_NT_98_DURING: {
+    label: "2022 · NT 98 · 12 dates", group: "During the fire",
+    latitude: 65.1607, longitude: -119.1042,
+    detailKm: 43.52,
+    pre: "2021-09-08", target: "2022-07-25",
+    preWindow: 10, targetWindow: 5,
+    dates: ["2022-06-20", "2022-06-30", "2022-07-03", "2022-07-05", "2022-07-08", "2022-07-20", "2022-07-25", "2022-07-28", "2022-07-30", "2022-08-02", "2022-08-12", "2022-08-14"],
+    observed: [0.581, 0.674, 0.893, 0.871, 0.668, 0.45, 0.993, 0.69, 0.572, 0.942, 1, 0.999],
+    note: "Northwest Territories · 12 acquisitions while the fire was burning · NBAC final perimeter 40,244 ha · pre scene from the previous summer",
+  },
+  CA_2022_NT_96_DURING: {
+    label: "2022 · NT 96 · 20 dates", group: "During the fire",
+    latitude: 62.0701, longitude: -115.2483,
+    detailKm: 43.52,
+    pre: "2022-06-19", target: "2022-07-16",
+    preWindow: 10, targetWindow: 5,
+    dates: ["2022-06-22", "2022-06-24", "2022-06-27", "2022-06-29", "2022-07-01", "2022-07-02", "2022-07-04", "2022-07-06", "2022-07-07", "2022-07-11", "2022-07-16", "2022-07-21", "2022-07-26", "2022-07-31", "2022-08-05", "2022-08-11", "2022-08-13", "2022-08-15", "2022-08-16", "2022-08-18"],
+    observed: [0.647, 0.654, 0.596, 0.531, 0.853, 0.254, 0.869, 0.847, 0.773, 0.835, 0.486, 0.971, 0.987, 0.848, 0.985, 0.925, 0.987, 0.987, 0.771, 0.884],
+    note: "Northwest Territories · 20 acquisitions while the fire was burning · NBAC final perimeter 36,708 ha · pre scene from the previous season",
+  },
+  CA_2024_NT_32_DURING: {
+    label: "2024 · NT 32 · 14 dates", group: "During the fire",
+    latitude: 64.5449, longitude: -116.1325,
+    detailKm: 35.84,
+    pre: "2024-07-16", target: "2024-08-07",
+    preWindow: 10, targetWindow: 5,
+    dates: ["2024-07-19", "2024-07-21", "2024-07-24", "2024-07-26", "2024-07-29", "2024-08-02", "2024-08-05", "2024-08-07", "2024-08-08", "2024-08-10", "2024-08-12", "2024-08-13", "2024-08-17", "2024-08-18"],
+    observed: [1, 0.929, 0.999, 0.458, 0.546, 0.186, 0.844, 0.815, 0.933, 0.775, 0.009, 0.613, 0.944, 0.302],
+    note: "Northwest Territories · 14 acquisitions while the fire was burning · NBAC final perimeter 33,242 ha · pre scene from the previous season",
+  },
+  CA_2025_MB_70_DURING: {
+    label: "2025 · MB 70 · 18 dates", group: "During the fire",
+    latitude: 51.672, longitude: -95.6825,
+    detailKm: 35.84,
+    pre: "2025-07-02", target: "2025-08-29",
+    preWindow: 10, targetWindow: 5,
+    dates: ["2025-07-18", "2025-07-23", "2025-07-25", "2025-07-30", "2025-08-02", "2025-08-04", "2025-08-09", "2025-08-24", "2025-08-27", "2025-08-29", "2025-08-31", "2025-09-03", "2025-09-13", "2025-09-18", "2025-09-23", "2025-09-26", "2025-09-28", "2025-10-01"],
+    observed: [0.207, 0.827, 0.885, 0.655, 0.459, 0.015, 0.717, 0.631, 0.584, 0.859, 0.931, 0.208, 0.5, 0.722, 0.931, 0.931, 0.931, 0.927],
+    note: "Manitoba · 18 acquisitions while the fire was burning · NBAC final perimeter 32,324 ha · pre scene from the previous season",
+  },
+  CA_2023_AB_693_DURING: {
+    label: "2023 · AB 693 · 16 dates", group: "During the fire",
+    latitude: 57.7139, longitude: -115.8412,
+    detailKm: 35.84,
+    pre: "2023-06-01", target: "2023-09-04",
+    preWindow: 10, targetWindow: 5,
+    dates: ["2023-06-26", "2023-07-06", "2023-07-16", "2023-07-21", "2023-08-05", "2023-08-20", "2023-08-25", "2023-08-30", "2023-09-04", "2023-09-09", "2023-09-19", "2023-10-09", "2023-10-14", "2023-10-29", "2023-11-08", "2023-11-23"],
+    observed: [0.454, 0.986, 0.042, 0.441, 0.567, 0.158, 0.986, 0.551, 0.768, 0.731, 0.986, 0.986, 0.986, 0.986, 0.069, 0.986],
+    note: "Alberta · 16 acquisitions while the fire was burning · NBAC final perimeter 29,574 ha · pre scene from the previous season",
+  },
+  CA_2025_NT_193_DURING: {
+    label: "2025 · NT 193 · 18 dates", group: "During the fire",
+    latitude: 60.2147, longitude: -117.0581,
+    detailKm: 35.84,
+    pre: "2025-05-12", target: "2025-08-10",
+    preWindow: 10, targetWindow: 5,
+    dates: ["2025-05-29", "2025-06-03", "2025-06-18", "2025-06-23", "2025-07-08", "2025-07-16", "2025-07-28", "2025-07-31", "2025-08-05", "2025-08-10", "2025-08-15", "2025-08-25", "2025-08-27", "2025-08-30", "2025-09-01", "2025-09-04", "2025-09-06", "2025-09-21"],
+    observed: [0.705, 0.519, 0.698, 0.537, 0.082, 0.707, 0.427, 0.463, 0.308, 0.132, 0.707, 0.706, 0.708, 0.708, 0.687, 0.55, 0.176, 0.643],
+    note: "Northwest Territories · 18 acquisitions while the fire was burning · NBAC final perimeter 19,945 ha · pre scene from the same-year spring",
+  },
+  CA_2025_AB_503_DURING: {
+    label: "2025 · AB 503 · 25 dates", group: "During the fire",
+    latitude: 59.4351, longitude: -119.8807,
+    detailKm: 46.08,
+    pre: "2024-08-30", target: "2025-08-05",
+    preWindow: 10, targetWindow: 5,
+    dates: ["2025-05-02", "2025-05-05", "2025-05-10", "2025-05-15", "2025-05-27", "2025-06-11", "2025-06-16", "2025-06-19", "2025-07-14", "2025-07-16", "2025-07-21", "2025-07-29", "2025-08-05", "2025-08-10", "2025-08-13", "2025-08-15", "2025-08-25", "2025-08-28", "2025-08-30", "2025-09-02", "2025-09-04", "2025-09-09", "2025-09-17", "2025-09-24", "2025-09-27"],
+    observed: [0.978, 0.839, 0.953, 0.945, 0.634, 0.339, 0.004, 0.473, 0.973, 0.807, 0.752, 0.966, 0.577, 0.283, 0.397, 0.993, 0.992, 0.964, 0.993, 0.974, 0.993, 0.993, 0.969, 0.987, 0.67],
+    note: "Alberta · 25 acquisitions while the fire was burning · NBAC final perimeter 17,678 ha · pre scene from the previous summer",
+  },
+  CA_2024_YT_445_DURING: {
+    label: "2024 · YT 445 · 16 dates", group: "During the fire",
+    latitude: 62.5487, longitude: -139.6687,
+    detailKm: 23.04,
+    pre: "2024-05-31", target: "2024-07-20",
+    preWindow: 10, targetWindow: 5,
+    dates: ["2024-06-10", "2024-06-15", "2024-06-18", "2024-06-20", "2024-06-23", "2024-06-25", "2024-06-28", "2024-06-30", "2024-07-20", "2024-07-28", "2024-08-02", "2024-08-04", "2024-08-07", "2024-08-12", "2024-08-14", "2024-08-17"],
+    observed: [0.17, 0.615, 0.881, 0.787, 0.556, 0.969, 0.966, 0.833, 0.984, 0.488, 0.593, 0.992, 0.992, 0.53, 0.27, 0.84],
+    note: "Yukon · 16 acquisitions while the fire was burning · NBAC final perimeter 14,442 ha · pre scene from the previous season",
+  },
+  CA_2024_PC_101_DURING: {
+    label: "2024 · PC 101 · 30 dates", group: "During the fire",
+    latitude: 61.4322, longitude: -125.9577,
+    detailKm: 23.04,
+    pre: "2024-06-28", target: "2024-08-19",
+    preWindow: 10, targetWindow: 5,
+    dates: ["2024-07-07", "2024-07-08", "2024-07-13", "2024-07-15", "2024-07-17", "2024-07-25", "2024-07-27", "2024-07-28", "2024-08-02", "2024-08-04", "2024-08-06", "2024-08-07", "2024-08-09", "2024-08-11", "2024-08-16", "2024-08-19", "2024-08-24", "2024-09-03", "2024-09-06", "2024-09-08", "2024-09-10", "2024-09-11", "2024-09-13", "2024-09-15", "2024-09-16", "2024-09-18", "2024-09-25", "2024-09-26", "2024-10-03", "2024-10-06"],
+    observed: [0.187, 0.141, 0.348, 0.901, 0.284, 0.823, 0.146, 0.219, 0.44, 0.544, 0.903, 0.905, 0.856, 0.402, 0.9, 0.649, 0.655, 0.698, 0.321, 0.564, 0.644, 0.315, 0.573, 0.153, 0.67, 0.346, 0.287, 0.093, 0.905, 0.855],
+    note: "Parks Canada · 30 acquisitions while the fire was burning · NBAC final perimeter 14,114 ha · pre scene from the previous season",
+  },
+  CA_2023_BC_850_DURING: {
+    label: "2023 · BC 850 · 26 dates", group: "During the fire",
+    latitude: 55.4531, longitude: -124.2583,
+    detailKm: 38.4,
+    pre: "2023-06-07", target: "2023-08-26",
+    preWindow: 10, targetWindow: 5,
+    dates: ["2023-06-25", "2023-06-27", "2023-06-30", "2023-07-07", "2023-07-12", "2023-07-20", "2023-08-01", "2023-08-04", "2023-08-06", "2023-08-16", "2023-08-19", "2023-08-21", "2023-08-24", "2023-08-26", "2023-08-29", "2023-08-31", "2023-09-03", "2023-09-08", "2023-09-10", "2023-09-13", "2023-09-20", "2023-10-13", "2023-10-18", "2023-10-20", "2023-10-28", "2023-11-07"],
+    observed: [0.818, 0.428, 0.549, 0.642, 0.982, 0.879, 0.294, 0.562, 0.229, 0.9, 0.93, 0.966, 0.571, 0.72, 0.353, 0.308, 0.139, 0.605, 0.987, 0.486, 0.86, 0.942, 0.369, 0.643, 0.988, 0.629],
+    note: "British Columbia · 26 acquisitions while the fire was burning · NBAC final perimeter 11,780 ha · pre scene from the previous season",
+  },
+  CA_2024_SK_682_DURING: {
+    label: "2024 · SK 682 · 15 dates", group: "During the fire",
+    latitude: 54.0802, longitude: -102.7831,
+    detailKm: 20.48,
+    pre: "2023-09-01", target: "2024-08-11",
+    preWindow: 10, targetWindow: 5,
+    dates: ["2024-04-08", "2024-04-23", "2024-05-08", "2024-06-02", "2024-07-07", "2024-07-17", "2024-08-01", "2024-08-11", "2024-08-16", "2024-08-26", "2024-08-31", "2024-09-05", "2024-09-10", "2024-09-15", "2024-09-20"],
+    observed: [1, 1, 1, 0.089, 0.586, 0.994, 0.918, 1, 0.906, 0.897, 0.266, 0.427, 0.589, 0.895, 0.999],
+    note: "Saskatchewan · 15 acquisitions while the fire was burning · NBAC final perimeter 10,721 ha · pre scene from the previous summer",
+  },
+  CA_2022_BC_423_DURING: {
+    label: "2022 · BC 423 · 12 dates", group: "During the fire",
+    latitude: 49.3354, longitude: -119.8189,
+    detailKm: 17.92,
+    pre: "2022-07-11", target: "2022-09-04",
+    preWindow: 10, targetWindow: 5,
+    dates: ["2022-07-31", "2022-08-05", "2022-08-10", "2022-08-15", "2022-08-25", "2022-08-30", "2022-09-04", "2022-09-09", "2022-09-19", "2022-09-24", "2022-10-04", "2022-10-14"],
+    observed: [0.977, 0.478, 0.746, 0.993, 0.428, 1, 0.599, 1, 0.099, 0.99, 1, 0.999],
+    note: "British Columbia · 12 acquisitions while the fire was burning · NBAC final perimeter 6,429 ha · pre scene from the previous season",
+  },
+  // Three events outside the NBAC archive, kept for what they test rather
+  // than for their size.
   CA_2026_BC_K70748: {
-    label: "2026 · BC · K70748 · 61,009 ha perimeter",
+    label: "2026 · BC K70748 · 61,009 ha", group: "Independently checked",
     latitude: 51.2716, longitude: -122.3370,
     detailKm: 56.32,
     pre: "2025-08-22", target: "2026-09-16",
-    note: "Independent validation fire · no NBAC mask · union recall 0.912, "
-        + "precision 0.961 after attributing neighbouring fires",
+    note: "British Columbia · BC Wildfire Service airborne-GPS perimeter · "
+        + "union recall 0.912, precision 0.961 after attributing neighbouring fires",
   },
-  // Out of domain on purpose: tropical peat, a hemisphere and a biome away from
-  // anything in training. The S2 model transfers here and the result is
-  // corroborated by dNBR; there is no burned-area reference for the period.
+  // C40983 is the larger of the two neighbours that sat inside K70748's
+  // buffered ROI and had to be attributed before its false positives could be
+  // counted — attributing them moved K70748's precision 0.829 -> 0.961. It is
+  // worth its own preset for that reason: the page can show that the burn the
+  // K70748 run had to set aside is a real scar the model maps on its own.
+  // Perimeter, centre and extent come from the BC Wildfire Service current
+  // fire polygon (PROT_CURRENT_FIRE_POLYS_SP, tracked 2026-09-04); the scar
+  // spans 62 x 64 km, so 71.68 km is the smallest window that holds it with a
+  // margin. The fire was called Under Control on 2026-09-04, and 2026-09-16 is
+  // the clearest post acquisition after that (cs_mean 0.93, no nodata) — the
+  // same datatake the K70748 preset opens on, these two fires being 45 km apart.
+  CA_2026_BC_C40983: {
+    label: "2026 · BC C40983 Pear Lake · 165,909 ha", group: "Independently checked",
+    latitude: 51.1892, longitude: -121.7129,
+    detailKm: 71.68,
+    pre: "2025-08-22", target: "2026-09-16",
+    note: "British Columbia · BC Wildfire Service perimeter 165,909 ha, "
+        + "lightning-caused, ignited 2026-07-18, Under Control 2026-09-04 · "
+        + "a neighbour of K70748, attributed during that validation",
+  },
   ID_2026_KETAPANG: {
-    label: "2026 · Ketapang, Kalimantan · out of domain",
+    label: "2026 · Ketapang, Kalimantan", group: "Independently checked",
     latitude: -1.7500, longitude: 110.1300,
     detailKm: 35.84,
     pre: "2025-10-07", target: "2026-09-02",
-    note: "Out-of-domain transfer · tropical peatland · dNBR-corroborated, "
+    note: "West Kalimantan, Indonesia · tropical peatland, a hemisphere and a "
+        + "biome from anything the model was fitted on · dNBR-corroborated, "
         + "no burned-area reference exists for Aug-Oct 2026",
   },
 });
@@ -157,7 +577,7 @@ for (const id of [
   "lag-summary", "engine-summary", "burned-summary", "pixel-summary",
   "obscured-summary", "obscured-detail", "window-cost", "pre-canvas", "current-canvas",
   "probability-canvas", "mask-canvas", "download-mask", "download-stack",
-  "model-summary",
+  "setup-help", "page-origin", "during-date", "during-date-field",
 ]) {
   elements[id.replace(/-([a-z])/g, (_, c) => c.toUpperCase())] = document.querySelector(`#${id}`);
 }
@@ -205,11 +625,6 @@ async function loadMeta() {
   if (!response.ok) throw new Error(`model_meta.json is missing (${response.status}).`);
   const meta = await response.json();
   state.meta = meta;
-  elements.modelSummary.textContent =
-    `${meta.name} · ${meta.in_ch_per_phase} channels per phase (${meta.bands.join(", ")}) · `
-    + `${meta.params.toLocaleString()} parameters · ${meta.patch_size} px patches, `
-    + `stride ${meta.stride} · trained ${meta.train_years[0]}-${meta.train_years.at(-1)}, `
-    + `validated ${meta.val_years.join("/")}, tested ${meta.test_years.join("/")}`;
   elements.threshold.value = meta.threshold;
   elements.thresholdValue.value = Number(meta.threshold).toFixed(2);
   return meta;
@@ -311,6 +726,79 @@ function detailPixels() {
 function markSceneCustom(message = "Custom scene · coordinates, dates or window adjusted manually.") {
   elements.scenePreset.value = "";
   elements.presetMeta.textContent = message;
+  // The series belonged to the preset that was selected. Once the scene is
+  // the reader's own, offering that preset's acquisitions would set a date
+  // over an area they no longer describe.
+  elements.duringDateField.hidden = true;
+}
+
+// The fire the page opens on. Not the largest — a first run should finish in a
+// reasonable time, and this is the one event here with an independent perimeter
+// to compare against.
+const DEFAULT_PRESET = "CA_2026_BC_K70748";
+
+// The search radii a preset falls back to, matching index.html's selected
+// options. A preset that does not narrow them must still reset them, or the
+// previous selection's narrower window would silently carry over.
+const DEFAULT_PRE_WINDOW = 20;
+const DEFAULT_TARGET_WINDOW = 10;
+
+/** Fill the preset <select> from SCENE_PRESETS, grouped by burned area.
+ *
+ * The options are built here rather than written into index.html so the two
+ * cannot drift: with this many fires, a hand-maintained list would eventually
+ * offer a value SCENE_PRESETS has no entry for, and applyScenePreset would
+ * silently do nothing.
+ */
+function populateScenePresets() {
+  const custom = document.createElement("option");
+  custom.value = "";
+  custom.disabled = true;
+  custom.textContent = "Custom scene";
+  elements.scenePreset.append(custom);
+
+  let group = null;
+  for (const [eventId, preset] of Object.entries(SCENE_PRESETS)) {
+    if (!group || group.label !== preset.group) {
+      group = document.createElement("optgroup");
+      group.label = preset.group;
+      elements.scenePreset.append(group);
+    }
+    const option = document.createElement("option");
+    option.value = eventId;
+    option.textContent = preset.label;
+    group.append(option);
+  }
+  elements.scenePreset.value = DEFAULT_PRESET;
+}
+
+/** Offer a during-fire preset's whole series, or hide the control.
+ *
+ * Each option carries the share of the fire that was not under cloud on that
+ * date, measured by the progression run. Several of these acquisitions saw
+ * almost nothing — the lowest is 0% — and the model will return almost nothing
+ * for them. Saying so on the option is the difference between reading that as
+ * cloud and reading it as the model missing the fire.
+ */
+function fillDuringDates(preset) {
+  const field = elements.duringDateField;
+  const select = elements.duringDate;
+  select.replaceChildren();
+  if (!preset.dates) {
+    field.hidden = true;
+    return;
+  }
+  preset.dates.forEach((date, i) => {
+    const option = document.createElement("option");
+    option.value = date;
+    const seen = preset.observed?.[i];
+    option.textContent = seen === undefined
+      ? `${i + 1}/${preset.dates.length} · ${date}`
+      : `${i + 1}/${preset.dates.length} · ${date} · ${Math.round(seen * 100)}% seen`;
+    select.append(option);
+  });
+  select.value = preset.target;
+  field.hidden = false;
 }
 
 function applyScenePreset(eventId) {
@@ -321,6 +809,14 @@ function applyScenePreset(eventId) {
   elements.detailSize.value = preset.detailKm;
   elements.preDate.value = preset.pre;
   elements.targetDate.value = preset.target;
+  fillDuringDates(preset);
+  // A preset may narrow the searches. The during-fire ones do: their scenes
+  // are days apart while the scar is still growing, so a wide target search
+  // would return a different stage of the fire, and several of their pre
+  // scenes are May acquisitions far enough north that a wide pre search
+  // reaches snow, which Cloud Score+ scores as perfectly clear.
+  elements.preWindow.value = String(preset.preWindow ?? DEFAULT_PRE_WINDOW);
+  elements.targetWindow.value = String(preset.targetWindow ?? DEFAULT_TARGET_WINDOW);
   elements.presetMeta.textContent = `${eventId} · ${preset.note}`;
   updateMapSelection(false);
   state.map.fitBounds(squareBounds(preset.latitude, preset.longitude, preset.detailKm),
@@ -397,8 +893,6 @@ function connectEarthEngine() {
   }
   localStorage.setItem("flamenet-ee-project", projectId);
   localStorage.setItem("flamenet-ee-client-id", clientId);
-  localStorage.setItem("wildfire-ee-project", projectId);
-  localStorage.setItem("wildfire-ee-client-id", clientId);
 
   if (state.authPopupReady) {
     state.authPopupReady = false;
@@ -1181,6 +1675,18 @@ function downloadSourceStack() {
 elements.connectButton.addEventListener("click", connectEarthEngine);
 elements.runButton.addEventListener("click", runWorkflow);
 elements.scenePreset.addEventListener("change", event => applyScenePreset(event.target.value));
+// Stepping through a during-fire series moves the target date and nothing
+// else — same fire, same window, a later moment in it — so this is not the
+// manual edit that markSceneCustom exists for.
+elements.duringDate.addEventListener("change", event => {
+  elements.targetDate.value = event.target.value;
+  const preset = SCENE_PRESETS[elements.scenePreset.value];
+  if (!preset) return;
+  const i = preset.dates.indexOf(event.target.value);
+  elements.presetMeta.textContent =
+    `${elements.scenePreset.value} · acquisition ${i + 1} of ${preset.dates.length}`
+    + ` · ${preset.note}`;
+});
 for (const field of [elements.latitude, elements.longitude]) {
   field.addEventListener("change", () => {
     markSceneCustom();
@@ -1210,12 +1716,18 @@ elements.threshold.addEventListener("input", () => {
 elements.downloadMask.addEventListener("click", downloadMask);
 elements.downloadStack.addEventListener("click", downloadSourceStack);
 
-elements.projectId.value = localStorage.getItem("flamenet-ee-project")
-  || localStorage.getItem("wildfire-ee-project")
-  || elements.projectId.value;
-elements.clientId.value = localStorage.getItem("flamenet-ee-client-id")
-  || localStorage.getItem("wildfire-ee-client-id")
-  || "";
+elements.projectId.value = localStorage.getItem("flamenet-ee-project") || elements.projectId.value;
+elements.clientId.value = localStorage.getItem("flamenet-ee-client-id") || "";
+
+// The origin Google wants in Authorized JavaScript origins is this page's own,
+// and getting it wrong is the usual reason a first sign-in fails. Print the
+// real one rather than asking the reader to construct it.
+elements.pageOrigin.textContent = location.origin;
+// Open the setup walkthrough for anyone who has not been through it. A reader
+// who already has both fields saved does not need it in their way.
+elements.setupHelp.open = !(elements.projectId.value && elements.clientId.value);
+
+populateScenePresets();
 initializeMap();
 
 loadMeta()

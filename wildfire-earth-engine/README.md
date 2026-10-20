@@ -77,6 +77,30 @@ the fire stopped, so the gap between the two is routinely 14 months and can be
 Every preset carries the pre date the dataset loader itself selected for that
 fire, so the presets run on exactly the pair the reported metrics came from.
 
+### The preset list
+
+The Canadian dropdown contains 35 post-fire examples from the NBAC archive's
+2024 and 2025 tiles, grouped by burned area and spanning **117 ha to 170,576
+ha** across ten provinces and territories. K70748 and C40983 are independently
+checked British Columbia events, and Ketapang is deliberately out of domain.
+
+Under **During the fire** are 15 events from the `CA_S1S2_2000ha` progression
+set (2022–2025), carrying **308 Sentinel-2 acquisitions** between them—12 to 35
+per fire. Selecting one reveals an **Acquisition** selector for its complete
+series. The page still runs one acquisition at a time.
+
+Each acquisition reports the percentage of the final fire area that was
+observable rather than cloud-covered on that date. It ranges from 0% to 100%,
+so a nearly empty prediction on a low-visibility date should not be interpreted
+as the model missing a visible fire. These progression presets narrow the target
+search to ±5 days and the pre-fire search to ±10 days so the page does not
+silently substitute another progression stage or a snowy pre-fire scene.
+
+The progression predictions intentionally represent a fraction of the final
+NBAC perimeter: those target scenes were acquired while the fire was still
+burning. Only the Sentinel-2 half of the source progression set is used here;
+its Sentinel-1 predictions belong to a different model.
+
 ### One window, because the model had one in training
 
 The orange box is both things at once: the extent segmented at 20 m in
@@ -137,9 +161,11 @@ about:
   reflectance is standardised *in place* and the false-colour panels are
   rasterised to their canvases before that happens.
 
-For reference, the largest preset (71.68 km, 3584 px) is 16 Earth Engine
-requests totalling ~140 MB, 729 model windows and ~525 MB resident. That is tens
-of seconds on WebGPU and minutes on WebAssembly.
+For reference, an 81.92 km preset is 4096 px, 16 Earth Engine requests and 961
+model windows. The optional 100 km endpoint is 5000 px, 25 Earth Engine
+requests, 1521 model windows and about 763 MiB for the eight input planes before
+the inference accumulators. That can take minutes and may exceed the memory
+available to a browser tab.
 
 ### A caution about the numbers at this extent
 

@@ -9,7 +9,7 @@
   <link rel="icon" href="../img/favicon.png" type="image/png">
   <link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin>
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.css">
-  <link rel="stylesheet" href="./style.css?v=20261018-2">
+  <link rel="stylesheet" href="./style.css?v=20261020-1">
 </head>
 <body>
   <header class="site-header">
@@ -38,14 +38,20 @@
         <label><span>OAuth client ID</span><input id="client-id" type="text" placeholder="…apps.googleusercontent.com" autocomplete="off"></label>
         <button id="connect-button" class="run-button" type="button"><span>Connect Google account</span><i aria-hidden="true">→</i></button>
       </div>
-      <details class="setup-help">
-        <summary>One-time OAuth setup instructions</summary>
+      <details class="setup-help" id="setup-help">
+        <summary>One-time setup — about five minutes, and you only do it once</summary>
+        <p>This page has no server and no credentials of its own: it runs on <b>your</b> Google account and <b>your</b> Earth Engine project. The two fields above are yours to fill in once; the browser remembers them afterwards. Each step below links to the exact console page it refers to.</p>
         <ol>
-          <li>In Google Cloud Console, use the Earth Engine-enabled project and create an OAuth 2.0 <b>Web application</b> client.</li>
-          <li>Add <code>https://alishibli97.github.io</code> as an authorized JavaScript origin.</li>
-          <li>Paste the resulting client ID above. A client ID is public configuration; never paste a client secret or service-account key.</li>
+          <li><b>Create or pick a Google Cloud project.</b> <a href="https://console.cloud.google.com/projectcreate" target="_blank" rel="noreferrer">console.cloud.google.com/projectcreate ↗</a><br>Copy its <b>project ID</b> — the lowercase one, not the display name — into <b>Google Cloud project</b> above.</li>
+          <li><b>Register that project for Earth Engine.</b> <a href="https://code.earthengine.google.com/register" target="_blank" rel="noreferrer">code.earthengine.google.com/register ↗</a><br>Pick noncommercial use if you qualify. Earth Engine access belongs to the project, not to your account, so this has to be the same project as step 1.</li>
+          <li><b>Enable the Earth Engine API in it.</b> <a href="https://console.cloud.google.com/apis/library/earthengine.googleapis.com" target="_blank" rel="noreferrer">API library → Earth Engine API ↗</a></li>
+          <li><b>Set up the consent screen.</b> <a href="https://console.cloud.google.com/auth/overview" target="_blank" rel="noreferrer">Google Auth Platform → Overview ↗</a><br>If the page says <i>“Google Auth platform not configured yet”</i>, press <b>Get Started</b> and fill in an app name, support email, audience and contact email. For the audience choose <b>External</b>, unless your account is in a Google Workspace organisation and everyone using the page is too.</li>
+          <li><b>Add yourself as a test user and stay in Testing.</b> <a href="https://console.cloud.google.com/auth/audience" target="_blank" rel="noreferrer">Google Auth Platform → Audience ↗</a><br>Under <b>Test users</b>, press <b>Add users</b> and enter the Google account you will use. An Internal audience has no test-user list and needs none.</li>
+          <li><b>Create an OAuth client of type Web application.</b> <a href="https://console.cloud.google.com/auth/clients" target="_blank" rel="noreferrer">Clients → Create client ↗</a><br>Under <b>Authorized JavaScript origins</b>, add exactly <code id="page-origin">this page’s origin</code> — scheme and host, with no path or trailing slash.</li>
+          <li><b>Paste the client ID into the second field above.</b> It ends in <code>.apps.googleusercontent.com</code>. A client ID is public configuration. <b>Never paste the client secret</b> or a service-account key.</li>
+          <li><b>Press Connect Google account.</b><br>The requested permission is <code>earthengine.readonly</code>. Earth Engine computation uses your project; model inference runs in this browser, and no imagery or result is uploaded by this page.</li>
         </ol>
-        <a href="https://developers.google.com/earth-engine/custom-apps/client-js" target="_blank" rel="noreferrer">Official Earth Engine setup guide ↗</a>
+        <a href="https://developers.google.com/earth-engine/custom-apps/client-js" target="_blank" rel="noreferrer">Google’s guide to client-side Earth Engine apps ↗</a>
       </details>
       <p class="message" id="connection-message" role="status" aria-live="polite"></p>
     </section>
@@ -148,6 +154,6 @@
   <script src="https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.js"></script>
   <script src="https://ajax.googleapis.com/ajax/libs/earthengine/1.7.47/earthengine-api.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/onnxruntime-web@1.23.2/dist/ort.webgpu.min.js"></script>
-  <script type="module" src="./app.js?v=20261018-2"></script>
+  <script type="module" src="./app.js?v=20261020-1"></script>
 </body>
 </html>
