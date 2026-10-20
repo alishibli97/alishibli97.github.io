@@ -65,10 +65,10 @@ const EE_SCOPE = "https://www.googleapis.com/auth/earthengine.readonly";
 // and cs_cdf quantised to 1e-4 moves a standardised channel by 1.5e-3.
 const DETAIL_CHUNK_PX = 1024;
 // The window itself is tiled across as many requests as it needs, so the real
-// ceiling is browser memory, not the response cap. At 4096 px the eight float32
-// planes are 537 MB before the accumulators, which is why the reflectance is
-// standardised in place and why the slider warns past 2048 px.
-const DETAIL_MAX_PX = 4096;
+// ceiling is browser memory, not the response cap. The UI permits 100 km, or
+// 5000 px at 20 m; its eight float32 planes alone use about 763 MiB before the
+// inference accumulators, which is why the slider warns past 2048 px.
+const DETAIL_MAX_PX = 5000;
 const CS_QUANT = 10000;
 const NODATA = -9999;
 
@@ -276,6 +276,11 @@ function updateMapSelection(pan = true) {
  */
 function updateWindowCost(px) {
   if (!state.meta) return;
+  if (detailKm() <= 0) {
+    elements.windowCost.textContent = "Choose a window larger than 0 km before running the model.";
+    elements.windowCost.classList.add("is-heavy");
+    return;
+  }
   const meta = state.meta;
   const chunks = Math.ceil(px / DETAIL_CHUNK_PX) ** 2;
   const windows = Math.ceil(Math.max(1, (px - meta.patch_size) / meta.stride) + 1) ** 2;
@@ -299,7 +304,7 @@ function updateWindowCost(px) {
 
 function detailPixels() {
   const scale = state.meta?.scale_m ?? 20;
-  return Math.min(DETAIL_MAX_PX, Math.max(state.meta?.patch_size ?? 256,
+  return Math.min(DETAIL_MAX_PX, Math.max(1,
     Math.round(detailKm() * 1000 / scale)));
 }
 
@@ -831,7 +836,7 @@ async function runInference(geometry) {
   const { width, height } = state.post;
 
   // In place: see the note in runWorkflow — at the top window size a second
-  // copy of the detail planes would be another 537 MB. Anything needing raw
+  // copy of the detail planes would be another 763 MiB at 100 km. Anything needing raw
   // reflectance has already been computed by the time this runs.
   const preNorm = standardiseInto(state.pre.channels, meta.mean, meta.std);
   const postNorm = standardiseInto(state.post.channels, meta.mean, meta.std);
@@ -895,6 +900,10 @@ async function runInference(geometry) {
 function validateRunInputs() {
   if (!state.meta) throw new Error("The model metadata has not loaded yet.");
   if (!state.eeConnected) throw new Error("Connect Earth Engine first.");
+  const windowKm = detailKm();
+  if (!Number.isFinite(windowKm) || windowKm <= 0 || windowKm > 100) {
+    throw new Error("Choose a window greater than 0 km and no larger than 100 km.");
+  }
   const latitude = Number(elements.latitude.value);
   const longitude = Number(elements.longitude.value);
   if (!Number.isFinite(latitude) || latitude < -85 || latitude > 85) {
@@ -969,10 +978,10 @@ async function runWorkflow() {
     state.sourceBlobs = detail.blobs;
 
     // Both of these need RAW reflectance, and runInference standardises the
-    // planes in place to avoid a second 537 MB copy at the top window size.
+    // planes in place to avoid a second 763 MiB copy at the top window size.
     // So the cloud mask is taken now, and the two false-colour panels are
     // rasterised to their canvases now rather than kept as arrays — the
-    // canvases are at most 900 px a side, where the planes are up to 4096.
+    // canvases are at most 900 px a side, where the planes are up to 5000.
     state.keep = (meta.cloud_valid_cs > 0 && meta.in_ch_per_phase > 3)
       ? cloudKeepMask(state.pre.channels[3], state.post.channels[3], meta.cloud_valid_cs)
       : null;

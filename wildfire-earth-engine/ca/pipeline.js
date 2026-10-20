@@ -90,8 +90,9 @@ export function standardise(channels, mean, std) {
 /**
  * _normalise in place, overwriting the reflectance arrays.
  *
- * A wide detail window is the deployment's memory ceiling: at 4096 px the eight
- * float32 planes are already 537 MB, and keeping a standardised copy as well
+ * A wide detail window is the deployment's memory ceiling: at 5000 px the eight
+ * float32 planes are already about 763 MiB, and keeping a standardised copy
+ * as well
  * would double that. Anything that needs the raw values — the cloud mask off
  * cs_cdf, the false-colour stretch — has to be computed before this runs.
  */

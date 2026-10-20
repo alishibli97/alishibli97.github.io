@@ -108,13 +108,15 @@ tiles were 1771–2698 px with 128–512 px sampling windows, which puts it betw
 
 | window | context scale | |
 |---|---|---|
+| 100 km (5000 px) | 0.051 | in range, but extremely memory-heavy |
 | 81.92 km (4096 px) | 0.063 | in range |
 | 56.32 km (2816 px) | 0.091 | in range, and near the training centre |
 | 17.92 km (896 px) | 0.286 | at the edge of the range |
 | 5.12 km (256 px) | 1.000 | far outside — don't |
 
-That is why the slider starts at 17.92 km, and why the readout under it names the
-context scale and says when the window has left the trained range.
+The slider exposes the complete 0–100 km exploration range, and the readout
+under it warns when a selected window is below the 17.92 km trained range.
+Zero is useful as a visible endpoint but cannot be run because it has no area.
 
 A single `computePixels` response is capped at 32 MiB, about 1024 px square with
 eight `int16` bands, so a wider window is fetched as a grid of requests and
@@ -131,7 +133,7 @@ about:
   each reduction near 150×150 cells. It costs nothing real — over a 72 km window
   the mean `cs_cdf` moves by 0.002 between 480 m and 1920 m, and these numbers
   only rank scenes.
-- **Memory.** At 4096 px the eight `float32` planes are 537 MB, so the
+- **Memory.** At 5000 px the eight `float32` planes are about 763 MiB, so the
   reflectance is standardised *in place* and the false-colour panels are
   rasterised to their canvases before that happens.
 

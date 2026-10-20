@@ -9,6 +9,8 @@ const CLOUD_SCORE_THRESHOLD = 0.60;
 const REFLECTANCE_SCALE = 5000;
 const TILE_SIZE = 256;
 const TILE_OVERLAP = 32;
+const PIXEL_SIZE_M = 20;
+const EE_CHUNK_PX = 1024;
 const DATASET_BANDS = ["B12", "B8", "B4"];
 
 const SCENE_PRESETS = Object.freeze({
@@ -334,13 +336,13 @@ function webMercatorGrid(latitude, longitude, sizeKm) {
   const x = radius * longitude * Math.PI / 180;
   const clampedLatitude = Math.max(-85.05112878, Math.min(85.05112878, latitude));
   const y = radius * Math.log(Math.tan(Math.PI / 4 + clampedLatitude * Math.PI / 360));
-  const dimension = Math.max(128, Math.round(sizeKm * 1000 / 20));
-  const span = dimension * 20;
+  const dimension = Math.max(1, Math.round(sizeKm * 1000 / PIXEL_SIZE_M));
+  const span = dimension * PIXEL_SIZE_M;
   return {
     dimensions: { width: dimension, height: dimension },
     affineTransform: {
-      scaleX: 20, shearX: 0, translateX: x - span / 2,
-      shearY: 0, scaleY: -20, translateY: y + span / 2,
+      scaleX: PIXEL_SIZE_M, shearX: 0, translateX: x - span / 2,
+      shearY: 0, scaleY: -PIXEL_SIZE_M, translateY: y + span / 2,
     },
     crsCode: "EPSG:3857",
   };
@@ -390,6 +392,83 @@ async function computePixels(image, grid, projectId) {
     throw new Error(`Earth Engine pixel request failed (${response.status})${detail ? `: ${detail}` : "."}`);
   }
   return response.blob();
+}
+
+function chunkEdges(pixels) {
+  const count = Math.ceil(pixels / EE_CHUNK_PX);
+  const edges = [0];
+  for (let index = 1; index <= count; index += 1) {
+    edges.push(Math.round(pixels * index / count));
+  }
+  return edges;
+}
+
+function chunkGrid(grid, row, col, width, height) {
+  const transform = grid.affineTransform;
+  return {
+    dimensions: { width, height },
+    affineTransform: {
+      ...transform,
+      translateX: transform.translateX + col * transform.scaleX + row * transform.shearX,
+      translateY: transform.translateY + col * transform.shearY + row * transform.scaleY,
+    },
+    crsCode: grid.crsCode,
+  };
+}
+
+function emptyRaster(width, height) {
+  const length = width * height;
+  return {
+    width,
+    height,
+    bands: [new Int16Array(length), new Int16Array(length), new Int16Array(length)],
+    clear: new Uint8Array(length),
+  };
+}
+
+function blitRaster(source, target, row, col) {
+  for (let y = 0; y < source.height; y += 1) {
+    const sourceStart = y * source.width;
+    const sourceEnd = sourceStart + source.width;
+    const targetStart = (row + y) * target.width + col;
+    for (let band = 0; band < 3; band += 1) {
+      target.bands[band].set(source.bands[band].subarray(sourceStart, sourceEnd), targetStart);
+    }
+    target.clear.set(source.clear.subarray(sourceStart, sourceEnd), targetStart);
+  }
+}
+
+async function fetchWindow(image, grid, projectId) {
+  const width = grid.dimensions.width;
+  const height = grid.dimensions.height;
+  const rows = chunkEdges(height);
+  const cols = chunkEdges(width);
+  const total = (rows.length - 1) * (cols.length - 1);
+  const pre = emptyRaster(width, height);
+  const current = emptyRaster(width, height);
+  let completed = 0;
+  let singleBlob = null;
+
+  for (let rowIndex = 0; rowIndex < rows.length - 1; rowIndex += 1) {
+    for (let colIndex = 0; colIndex < cols.length - 1; colIndex += 1) {
+      const row = rows[rowIndex];
+      const col = cols[colIndex];
+      const chunkHeight = rows[rowIndex + 1] - row;
+      const chunkWidth = cols[colIndex + 1] - col;
+      setProgress(0.34 + 0.22 * completed / total,
+        total === 1
+          ? `Fetching ${width} × ${height} Sentinel-2 pixels…`
+          : `Fetching Sentinel-2 request ${completed + 1} of ${total}…`);
+      const blob = await computePixels(
+        image, chunkGrid(grid, row, col, chunkWidth, chunkHeight), projectId);
+      const rasters = await readStack(await blob.arrayBuffer());
+      blitRaster(rasters.pre, pre, row, col);
+      blitRaster(rasters.current, current, row, col);
+      if (total === 1) singleBlob = blob;
+      completed += 1;
+    }
+  }
+  return { pre, current, sourceBlob: singleBlob, requests: total };
 }
 
 function buildDailyCollection(roi, start, end, target) {
@@ -564,6 +643,10 @@ async function inferProgression(elapsedDays) {
 
 function validateRunInputs() {
   if (!state.eeConnected) throw new Error("Connect Earth Engine first.");
+  const roiKm = Number(elements.roiSize.value);
+  if (!Number.isFinite(roiKm) || roiKm <= 0 || roiKm > 100) {
+    throw new Error("Choose an ROI width greater than 0 km and no larger than 100 km.");
+  }
   const latitude = Number(elements.latitude.value);
   const longitude = Number(elements.longitude.value);
   if (!Number.isFinite(latitude) || latitude < -85 || latitude > 85) throw new Error("Latitude must be between −85 and 85.");
@@ -599,8 +682,8 @@ async function runEarthEngineWorkflow() {
     const stack = prepareImage(selected.preImage, "pre").addBands(prepareImage(selected.currentImage, "current"));
     const grid = webMercatorGrid(latitude, longitude, Number(elements.roiSize.value));
     setProgress(0.34, "Computing aligned Sentinel-2 pixels…");
-    state.sourceBlob = await computePixels(stack, grid, elements.projectId.value.trim());
-    const rasters = await readStack(await state.sourceBlob.arrayBuffer());
+    const rasters = await fetchWindow(stack, grid, elements.projectId.value.trim());
+    state.sourceBlob = rasters.sourceBlob;
     state.pre = rasters.pre;
     state.current = rasters.current;
     setProgress(0.56, `Loaded ${state.current.width} × ${state.current.height} pixels; loading model…`);
