@@ -55,7 +55,7 @@ import {
   sampleContext, standardise, standardiseInto, windowStarts,
 // ?v= must match index.html's. A fresh app.js next to a cached pipeline.js is
 // worse than both being stale: the numeric core and its caller would disagree.
-} from "./pipeline.js?v=6";
+} from "./pipeline.js?v=7";
 
 const MODEL_DIR = "./model/";
 const ORT_ASSET_PATH = "https://cdn.jsdelivr.net/npm/onnxruntime-web@1.23.2/dist/";
@@ -66,6 +66,9 @@ const EE_SCOPE = "https://www.googleapis.com/auth/earthengine.readonly";
 // (17 MB, with headroom); the reflectance DN are integers in the archive anyway
 // and cs_cdf quantised to 1e-4 moves a standardised channel by 1.5e-3.
 const DETAIL_CHUNK_PX = 1024;
+const EE_MAX_ATTEMPTS = 3;
+const EE_REQUEST_TIMEOUT_MS = 60000;
+const EE_RETRYABLE_STATUS = new Set([408, 425, 429, 500, 502, 503, 504]);
 // The window itself is tiled across as many requests as it needs, so the real
 // ceiling is browser memory, not the response cap. The UI permits 100 km, or
 // 5000 px at 20 m; its eight float32 planes alone use about 763 MiB before the
@@ -1160,31 +1163,62 @@ function contextImage(stack, crsCode, grid, scale) {
 }
 
 async function computePixels(image, grid, projectId, bands, tag) {
-  const token = await freshAuthToken();
-  const response = await fetch(
-    `https://earthengine.googleapis.com/v1/projects/${encodeURIComponent(projectId)}/image:computePixels`,
-    {
-      method: "POST",
-      headers: {
-        Authorization: token,
-        "Content-Type": "application/json",
-        "X-Goog-User-Project": projectId,
-      },
-      body: JSON.stringify({
-        expression: window.ee.Serializer.encodeCloudApi(image),
-        fileFormat: "GEO_TIFF",
-        grid,
-        bandIds: bands,
-        workloadTag: "flamenet-s2-browser",
-      }),
-    },
-  );
-  if (!response.ok) {
+  const endpoint = `https://earthengine.googleapis.com/v1/projects/${encodeURIComponent(projectId)}/image:computePixels`;
+  const body = JSON.stringify({
+    expression: window.ee.Serializer.encodeCloudApi(image),
+    fileFormat: "GEO_TIFF",
+    grid,
+    bandIds: bands,
+    workloadTag: "flamenet-s2-browser",
+  });
+
+  for (let attempt = 1; attempt <= EE_MAX_ATTEMPTS; attempt += 1) {
+    const token = await freshAuthToken();
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), EE_REQUEST_TIMEOUT_MS);
+    let response;
+    try {
+      response = await fetch(endpoint, {
+        method: "POST",
+        headers: {
+          Authorization: token,
+          "Content-Type": "application/json",
+          "X-Goog-User-Project": projectId,
+        },
+        body,
+        signal: controller.signal,
+      });
+    } catch (error) {
+      clearTimeout(timeout);
+      if (attempt === EE_MAX_ATTEMPTS) {
+        const reason = error?.name === "AbortError" ? "timed out" : normalizeError(error);
+        throw new Error(`Earth Engine ${tag} request ${reason} after ${EE_MAX_ATTEMPTS} attempts. `
+          + "Try a smaller window or wait a few minutes before running it again.");
+      }
+      elements.progressText.textContent = `Earth Engine did not answer for ${tag}; retrying request ${attempt + 1} of ${EE_MAX_ATTEMPTS}…`;
+      await new Promise(resolve => setTimeout(resolve, 750 * 2 ** (attempt - 1)));
+      continue;
+    }
+    clearTimeout(timeout);
+    if (response.ok) return response.blob();
+
     let detail = "";
     try { detail = (await response.json()).error?.message || ""; } catch (_) { /* binary or empty */ }
-    throw new Error(`Earth Engine ${tag} request failed (${response.status})${detail ? `: ${detail}` : "."}`);
+    if (EE_RETRYABLE_STATUS.has(response.status) && attempt < EE_MAX_ATTEMPTS) {
+      elements.progressText.textContent = `Earth Engine is busy (${response.status}) for ${tag}; retrying request ${attempt + 1} of ${EE_MAX_ATTEMPTS}…`;
+      const retryAfter = Number(response.headers.get("Retry-After"));
+      const delay = Number.isFinite(retryAfter) && retryAfter > 0
+        ? retryAfter * 1000
+        : 750 * 2 ** (attempt - 1);
+      await new Promise(resolve => setTimeout(resolve, Math.min(delay, 10000)));
+      continue;
+    }
+    const exhausted = EE_RETRYABLE_STATUS.has(response.status)
+      ? ` after ${EE_MAX_ATTEMPTS} attempts. Try a smaller window or wait a few minutes before running it again.`
+      : ".";
+    throw new Error(`Earth Engine ${tag} request failed (${response.status})${detail ? `: ${detail}` : ""}${exhausted}`);
   }
-  return response.blob();
+  throw new Error(`Earth Engine ${tag} request failed unexpectedly.`);
 }
 
 /**
